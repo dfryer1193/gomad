@@ -1,21 +1,15 @@
 package rest
 
 import (
-	"github.com/dfryer1193/gomad/internal/rest/migrations"
-	"github.com/gin-gonic/gin"
+	"github.com/go-chi/chi/v5"
 )
 
-func NewApi(router *gin.Engine) {
-	migrationsManager := migrations.NewMigrationsManager()
+func NewApi(router *chi.Mux) {
 	hookManager := NewHookManager()
 
-	hookRouter := router.Group("/hooks/v1")
-	{
-		hookRouter.POST("/push", hookManager.HandlePush)
-	}
-	migrationsRouter := router.Group("/migrations/v1")
-	{
-		migrationsRouter.GET("/databases", migrationsManager.GetDatabases)
-		migrationsRouter.GET("/databases/:database", migrationsManager.GetMigrationsForDatabase)
-	}
+	router.Route("/hooks/v1", func(r chi.Router) {
+		r.Post("/push", hookManager.HandlePush)
+	})
+	router.Route("/migrations/v1", func(r chi.Router) {
+	})
 }
