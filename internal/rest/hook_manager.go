@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/dfryer1193/mjolnir/middleware"
+	"github.com/dfryer1193/mjolnir/utils"
 	"github.com/rs/zerolog/log"
 	"io"
 	"net/http"
@@ -54,36 +56,29 @@ type PushEvent struct {
 }
 
 // HandlePush handles Git push webhooks
-func (h *HookManager) HandlePush(c *gin.Context) {
+func (h *HookManager) HandlePush(w http.ResponseWriter, r *http.Request) {
 	// Read the raw body
-	body, err := io.ReadAll(c.Request.Body)
+	event := &PushEvent{}
+	bodyBytes, err := utils.DecodeJSON(r, event)
 	if err != nil {
-		log.Err(err).Msg("Failed to read request body")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
+		middleware.SetBadRequestError(r, fmt.Errorf("failed to decode JSON: %w", err))
 		return
 	}
 
 	// Validate webhook signature
-	if !h.validateSignature(c.Request, body) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid webhook signature"})
-		return
-	}
-
-	// Parse the webhook payload
-	var event PushEvent
-	if err := json.Unmarshal(body, &event); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse webhook payload"})
+	if !h.validateSignature(r, bodyBytes) {
+		middleware.SetUnauthorizedError(r, fmt.Errorf("Invalid webhook signature"))
 		return
 	}
 
 	// Only process pushes to master branch
 	if event.Ref != "refs/heads/master" {
-		c.Status(http.StatusOK)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
 	// Process changed files
-	if err := h.processChanges(&event); err != nil {
+	if err := h.processSQLChanges(&event); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to process changes: %v", err)})
 		return
 	}
@@ -107,21 +102,21 @@ func (h *HookManager) validateSignature(r *http.Request, body []byte) bool {
 	return hmac.Equal([]byte(signature), []byte(expectedSignature))
 }
 
-// processChanges handles the changes from the push event
-func (h *HookManager) processChanges(event *PushEvent) error {
+// processSQLChanges handles the changes from the push event
+func (h *HookManager) processSQLChanges(event *PushEvent) error {
 	changedFiles := make(map[string]struct{})
 
 	// Collect all changed files
 	for _, commit := range event.Commits {
 		for _, file := range commit.Added {
-			changedFiles[file] = struct{}{}
+			if strings.HasSuffix(file, ".sql") {
+				changedFiles[file] = struct{}{}
+			}
 		}
 		for _, file := range commit.Modified {
-			changedFiles[file] = struct{}{}
-		}
-		// Optionally handle removed files if needed
-		for _, file := range commit.Removed {
-			changedFiles[file] = struct{}{}
+			if strings.HasSuffix(file, ".sql") {
+				changedFiles[file] = struct{}{}
+			}
 		}
 	}
 
