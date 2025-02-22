@@ -4,17 +4,13 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
+	"github.com/dfryer1193/gomad/internal/utils"
 	"github.com/dfryer1193/mjolnir/middleware"
-	"github.com/dfryer1193/mjolnir/utils"
-	"github.com/rs/zerolog/log"
-	"io"
+	mjolnirUtils "github.com/dfryer1193/mjolnir/utils"
 	"net/http"
 	"os"
 	"strings"
-
-	"github.com/gin-gonic/gin"
 )
 
 type HookManager struct {
@@ -59,7 +55,7 @@ type PushEvent struct {
 func (h *HookManager) HandlePush(w http.ResponseWriter, r *http.Request) {
 	// Read the raw body
 	event := &PushEvent{}
-	bodyBytes, err := utils.DecodeJSON(r, event)
+	bodyBytes, err := mjolnirUtils.DecodeJSON(r, event)
 	if err != nil {
 		middleware.SetBadRequestError(r, fmt.Errorf("failed to decode JSON: %w", err))
 		return
@@ -78,12 +74,12 @@ func (h *HookManager) HandlePush(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Process changed files
-	if err := h.processSQLChanges(&event); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to process changes: %v", err)})
+	if err := h.processSQLChanges(event); err != nil {
+		middleware.SetInternalError(r, fmt.Errorf("failed to process SQL changes: %w", err))
 		return
 	}
 
-	c.Status(http.StatusOK)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // validateSignature validates the webhook signature
@@ -122,7 +118,12 @@ func (h *HookManager) processSQLChanges(event *PushEvent) error {
 
 	// Process each changed file
 	for file := range changedFiles {
-		if err := h.processFile(file); err != nil {
+		metadata := &utils.FileMetadata{
+			RepoName: event.Repository.FullName,
+			Path:     file,
+			Commit:   event.After,
+		}
+		if err := h.processFile(metadata); err != nil {
 			return fmt.Errorf("failed to process file %s: %w", file, err)
 		}
 	}
@@ -131,8 +132,19 @@ func (h *HookManager) processSQLChanges(event *PushEvent) error {
 }
 
 // processFile handles individual file changes
-func (h *HookManager) processFile(filename string) error {
-	// Add your file processing logic here
-	// For example, if it's a SQL file, you might want to parse and execute it
+func (h *HookManager) processFile(metadata *utils.FileMetadata) error {
+	content, err := utils.GetGitFileFetcher().FetchRawGitFile(*metadata)
+	if err != nil {
+		return err
+	}
+
+	migrations, err := utils.ParseSQL(content)
+	if err != nil {
+		return err
+	}
+	if len(migrations) == 0 {
+	}
+
+	// Parse and add DDL to database.
 	return nil
 }

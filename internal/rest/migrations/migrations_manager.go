@@ -1,26 +1,37 @@
 package migrations
 
 import (
-	"github.com/dfryer1193/gomad/internal/data/dao"
+	"github.com/dfryer1193/gomad/internal/data/repository"
+	"github.com/dfryer1193/gomad/internal/data/repository/postgres"
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 	"net/http"
+	"sync"
 )
 
-type Manager struct {
-	dbDao         *dao.DatabaseDAO
-	migrationsDao *dao.MigrationDAO
+type MigrationManager struct {
+	databases  repository.DatabaseRepository
+	migrations repository.MigrationRepository
 }
 
-func NewMigrationsManager() *Manager {
-	return &Manager{
-		dbDao:         dao.NewDatabaseDAO(),
-		migrationsDao: dao.NewMigrationDAO(),
-	}
+var (
+	migrationsManager *MigrationManager
+	once              sync.Once
+)
+
+func GetMigrationsManager() *MigrationManager {
+	once.Do(func() {
+		migrationsManager = &MigrationManager{
+			databases:  postgres.NewDatabaseRepository(),
+			migrations: postgres.NewMigrationRepository(),
+		}
+	})
+
+	return migrationsManager
 }
 
-func (mgr *Manager) GetDatabases(ctx *gin.Context) {
-	dbs, err := mgr.dbDao.ListDatabases(ctx)
+func (mgr *MigrationManager) GetDatabases(ctx *gin.Context) {
+	dbs, err := mgr.databases.ListDatabases(ctx)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to list databases")
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list databases"})
@@ -29,9 +40,9 @@ func (mgr *Manager) GetDatabases(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"databases": dbs})
 }
 
-func (mgr *Manager) GetMigrationsForDatabase(ctx *gin.Context) {
+func (mgr *MigrationManager) GetMigrationsForDatabase(ctx *gin.Context) {
 	dbName := ctx.Param("database")
-	migrations, err := mgr.migrationsDao.GetByNamespace(ctx, dbName)
+	migrations, err := mgr.migrations.GetByNamespace(ctx, dbName)
 	if err != nil {
 		log.Err(err).Msg("failed to get migrations")
 		ctx.JSON(
