@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/dfryer1193/gomad/internal/rest"
 	"github.com/dfryer1193/mjolnir/router"
 	"github.com/rs/zerolog/log"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 
 func main() {
 	r := router.New()
+
+	rest.SetupRoutes(r)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", 80),

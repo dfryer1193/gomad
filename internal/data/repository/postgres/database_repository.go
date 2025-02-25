@@ -4,6 +4,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"github.com/dfryer1193/gomad/internal/data/repository"
 	"github.com/dfryer1193/gomad/internal/data/utils"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -11,16 +12,16 @@ import (
 	"sync"
 )
 
-type DatabaseRepository struct {
+type databaseRepository struct {
 	pool *pgxpool.Pool
 }
 
 var (
-	databaseRepository *DatabaseRepository
-	databaseOnce       sync.Once
+	dbRepo       *databaseRepository
+	databaseOnce sync.Once
 )
 
-func NewDatabaseRepository() *DatabaseRepository {
+func GetDatabaseRepository() repository.DatabaseRepository {
 	databaseOnce.Do(func() {
 		connString, err := utils.BuildConnectionString("postgres")
 		if err != nil {
@@ -31,13 +32,13 @@ func NewDatabaseRepository() *DatabaseRepository {
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create connection pool for database management")
 		}
-		databaseRepository = &DatabaseRepository{pool: pool}
+		dbRepo = &databaseRepository{pool: pool}
 	})
 
-	return databaseRepository
+	return dbRepo
 }
 
-func (r *DatabaseRepository) CreateDatabase(ctx context.Context, dbName string, owner string) error {
+func (r *databaseRepository) CreateDatabase(ctx context.Context, dbName string, owner string) error {
 	exists, err := r.DatabaseExists(ctx, dbName)
 	if err != nil {
 		return fmt.Errorf("failed to check database existence: %w", err)
@@ -60,7 +61,7 @@ func (r *DatabaseRepository) CreateDatabase(ctx context.Context, dbName string, 
 	return nil
 }
 
-func (r *DatabaseRepository) DatabaseExists(ctx context.Context, dbName string) (bool, error) {
+func (r *databaseRepository) DatabaseExists(ctx context.Context, dbName string) (bool, error) {
 	var exists bool
 	query := `SELECT EXISTS(
         SELECT 1 FROM pg_database WHERE datname = $1
@@ -74,7 +75,7 @@ func (r *DatabaseRepository) DatabaseExists(ctx context.Context, dbName string) 
 	return exists, nil
 }
 
-func (r *DatabaseRepository) ListDatabases(ctx context.Context) ([]string, error) {
+func (r *databaseRepository) ListDatabases(ctx context.Context) ([]string, error) {
 	query := `SELECT datname FROM pg_database WHERE datistemplate = false`
 
 	rows, err := r.pool.Query(ctx, query)
@@ -99,6 +100,6 @@ func (r *DatabaseRepository) ListDatabases(ctx context.Context) ([]string, error
 	return databases, nil
 }
 
-func (r *DatabaseRepository) Close() {
+func (r *databaseRepository) Close() {
 	r.pool.Close()
 }

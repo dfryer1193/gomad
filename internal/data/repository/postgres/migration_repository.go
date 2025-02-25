@@ -4,24 +4,24 @@ import (
 	"context"
 	"fmt"
 	"github.com/dfryer1193/gomad/api"
+	"github.com/dfryer1193/gomad/internal/data/repository"
 	"github.com/dfryer1193/gomad/internal/data/utils"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
-	"reflect"
 	"sync"
 )
 
-type MigrationRepository struct {
+type migrationRepository struct {
 	pool *pgxpool.Pool
 }
 
 var (
-	migrationRepository *MigrationRepository
-	migrationOnce       sync.Once
+	migrationRepo *migrationRepository
+	migrationOnce sync.Once
 )
 
-func NewMigrationRepository() *MigrationRepository {
+func GetMigrationRepository() repository.MigrationRepository {
 	migrationOnce.Do(func() {
 		connString, err := utils.BuildConnectionString("migrations")
 		if err != nil {
@@ -32,43 +32,12 @@ func NewMigrationRepository() *MigrationRepository {
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to create connection pool for migrations database")
 		}
-		migrationRepository = &MigrationRepository{pool: pool}
+		migrationRepo = &migrationRepository{pool: pool}
 	})
-	return migrationRepository
+	return migrationRepo
 }
 
-func (r *MigrationRepository) queryMigrations(ctx context.Context, query string, args ...any) ([]*api.Migration, error) {
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var migrations []*api.Migration
-	for rows.Next() {
-		m := &api.Migration{}
-		err := rows.Scan(
-			&m.ID,
-			&m.Namespace,
-			&m.User,
-			&m.Comment,
-			&m.DDL,
-			&m.CompletedAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		migrations = append(migrations, m)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return migrations, nil
-}
-
-func (r *MigrationRepository) GetFilteredBySignature(ctx context.Context, signatures []uint64) ([]*api.Migration, error) {
+func (r *migrationRepository) GetFilteredBySignature(ctx context.Context, signatures []uint64) ([]*api.Migration, error) {
 	if len(signatures) == 0 {
 		return []*api.Migration{}, nil
 	}
@@ -87,7 +56,7 @@ func (r *MigrationRepository) GetFilteredBySignature(ctx context.Context, signat
 	return migrations, nil
 }
 
-func (r *MigrationRepository) BulkInsert(ctx context.Context, migrations []*api.MigrationProto) error {
+func (r *migrationRepository) BulkInsert(ctx context.Context, migrations []*api.MigrationProto) error {
 	if len(migrations) == 0 {
 		return nil
 	}
@@ -119,4 +88,39 @@ func (r *MigrationRepository) BulkInsert(ctx context.Context, migrations []*api.
 	}
 
 	return nil
+}
+
+func (r *migrationRepository) Close() {
+	r.pool.Close()
+}
+
+func (r *migrationRepository) queryMigrations(ctx context.Context, query string, args ...any) ([]*api.Migration, error) {
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var migrations []*api.Migration
+	for rows.Next() {
+		m := &api.Migration{}
+		err := rows.Scan(
+			&m.ID,
+			&m.Namespace,
+			&m.User,
+			&m.Comment,
+			&m.DDL,
+			&m.CompletedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		migrations = append(migrations, m)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return migrations, nil
 }

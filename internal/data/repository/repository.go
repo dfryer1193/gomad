@@ -6,9 +6,8 @@ import (
 )
 
 type MigrationRepository interface {
-	Create(ctx context.Context, m *api.Migration) error
 	GetFilteredBySignature(ctx context.Context, signatures []uint64) ([]*api.Migration, error)
-	GetByNamespace(ctx context.Context, namespace string) ([]*api.Migration, error)
+	BulkInsert(ctx context.Context, migrations []*api.MigrationProto) error
 	Close()
 }
 

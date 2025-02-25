@@ -9,11 +9,17 @@ import (
 	"time"
 )
 
+type MigrationFileParser struct{}
+
+func NewMigrationFileParser() *MigrationFileParser {
+	return &MigrationFileParser{}
+}
+
 // ParseSQL parses a SQL file content into a slice of MigrationProto structs.
 // The SQL file should have migrations in the format:
 // -- skip?:user:namespace:comment
 // SQL statements...
-func ParseSQL(content string) ([]api.MigrationProto, error) {
+func (p *MigrationFileParser) ParseSQL(content string) ([]api.MigrationProto, error) {
 	var migrations []api.MigrationProto
 	var currentMigration *api.MigrationProto
 	var ddlBuilder strings.Builder
