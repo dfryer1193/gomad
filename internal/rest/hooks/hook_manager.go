@@ -13,23 +13,39 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 )
 
-type HookManager struct {
-	secret       string
-	migrationMgr migrations.MigrationManager
+type HookManager interface {
+	HandlePush(w http.ResponseWriter, r *http.Request)
 }
 
-func NewHookManager() *HookManager {
-	// Get webhook secret from environment
+type hookManager struct {
+	secret         string
+	migrationMgr   migrations.MigrationManager
+	gitFileFetcher utils.GitFileFetcher
+}
+
+var (
+	once sync.Once
+	mgr  *hookManager
+)
+
+func GetHookManager() HookManager {
 	secret := os.Getenv("WEBHOOK_SECRET")
 	if secret == "" {
 		panic("WEBHOOK_SECRET environment variable is required")
 	}
 
-	return &HookManager{
-		secret: secret,
-	}
+	once.Do(func() {
+		mgr = &hookManager{
+			secret:         secret,
+			migrationMgr:   migrations.GetMigrationsManager(),
+			gitFileFetcher: utils.GetGitFileFetcher(),
+		}
+	})
+
+	return mgr
 }
 
 type PushEvent struct {
@@ -55,7 +71,7 @@ type PushEvent struct {
 }
 
 // HandlePush handles Git push webhooks
-func (h *HookManager) HandlePush(w http.ResponseWriter, r *http.Request) {
+func (h *hookManager) HandlePush(w http.ResponseWriter, r *http.Request) {
 	// Read the raw body
 	event := &PushEvent{}
 	bodyBytes, err := mjolnirUtils.DecodeJSON(r, event)
@@ -92,7 +108,7 @@ func (h *HookManager) HandlePush(w http.ResponseWriter, r *http.Request) {
 }
 
 // validateSignature validates the webhook signature
-func (h *HookManager) validateSignature(r *http.Request, body []byte) bool {
+func (h *hookManager) validateSignature(r *http.Request, body []byte) bool {
 	signature := r.Header.Get("X-Hub-Signature-256")
 	if signature == "" {
 		return false
@@ -108,7 +124,7 @@ func (h *HookManager) validateSignature(r *http.Request, body []byte) bool {
 }
 
 // processSQLFiles handles the changes from the push event
-func (h *HookManager) processSQLFiles(event *PushEvent) ([]api.MigrationProto, error) {
+func (h *hookManager) processSQLFiles(event *PushEvent) ([]api.MigrationProto, error) {
 	migrationPrototypes := make([]api.MigrationProto, 0)
 
 	// Collect all changed files
@@ -137,13 +153,13 @@ func (h *HookManager) processSQLFiles(event *PushEvent) ([]api.MigrationProto, e
 }
 
 // processFile handles individual file changes
-func (h *HookManager) processFile(repoName string, path string, commit string) ([]api.MigrationProto, error) {
+func (h *hookManager) processFile(repoName string, path string, commit string) ([]api.MigrationProto, error) {
 	metadata := &utils.FileMetadata{
 		RepoName: repoName,
 		Path:     path,
 		Commit:   commit,
 	}
-	content, err := utils.GetGitFileFetcher().FetchRawGitFile(*metadata)
+	content, err := h.gitFileFetcher.FetchRawGitFile(*metadata)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch file %s: %w", metadata.Path, err)
 	}
