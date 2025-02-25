@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/dfryer1193/gomad/api"
+	"github.com/dfryer1193/gomad/internal/rest/migrations"
 	"github.com/dfryer1193/gomad/internal/utils"
 	"github.com/dfryer1193/mjolnir/middleware"
 	mjolnirUtils "github.com/dfryer1193/mjolnir/utils"
@@ -14,7 +16,8 @@ import (
 )
 
 type HookManager struct {
-	secret string
+	secret       string
+	migrationMgr migrations.MigrationManager
 }
 
 func NewHookManager() *HookManager {
@@ -73,9 +76,15 @@ func (h *HookManager) HandlePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Process changed files
-	if err := h.processSQLChanges(event); err != nil {
+	migrationPrototypes, err := h.processSQLFiles(event)
+	if err != nil {
 		middleware.SetInternalError(r, fmt.Errorf("failed to process SQL changes: %w", err))
+		return
+	}
+
+	err = h.migrationMgr.ProcessMigrations(r.Context(), migrationPrototypes)
+	if err != nil {
+		middleware.SetInternalError(r, fmt.Errorf("failed to process migrations: %w", err))
 		return
 	}
 
@@ -98,53 +107,55 @@ func (h *HookManager) validateSignature(r *http.Request, body []byte) bool {
 	return hmac.Equal([]byte(signature), []byte(expectedSignature))
 }
 
-// processSQLChanges handles the changes from the push event
-func (h *HookManager) processSQLChanges(event *PushEvent) error {
-	changedFiles := make(map[string]struct{})
+// processSQLFiles handles the changes from the push event
+func (h *HookManager) processSQLFiles(event *PushEvent) ([]api.MigrationProto, error) {
+	migrationPrototypes := make([]api.MigrationProto, 0)
 
 	// Collect all changed files
 	for _, commit := range event.Commits {
 		for _, file := range commit.Added {
 			if strings.HasSuffix(file, ".sql") {
-				changedFiles[file] = struct{}{}
+				protos, err := h.processFile(event.Repository.FullName, file, event.After)
+				if err != nil {
+					return nil, fmt.Errorf("failed to process file %s: %w", file, err)
+				}
+				migrationPrototypes = append(migrationPrototypes, protos...)
 			}
 		}
 		for _, file := range commit.Modified {
 			if strings.HasSuffix(file, ".sql") {
-				changedFiles[file] = struct{}{}
+				protos, err := h.processFile(event.Repository.FullName, file, event.After)
+				if err != nil {
+					return nil, fmt.Errorf("failed to process file %s: %w", file, err)
+				}
+				migrationPrototypes = append(migrationPrototypes, protos...)
 			}
 		}
 	}
 
-	// Process each changed file
-	for file := range changedFiles {
-		metadata := &utils.FileMetadata{
-			RepoName: event.Repository.FullName,
-			Path:     file,
-			Commit:   event.After,
-		}
-		if err := h.processFile(metadata); err != nil {
-			return fmt.Errorf("failed to process file %s: %w", file, err)
-		}
-	}
-
-	return nil
+	return migrationPrototypes, nil
 }
 
 // processFile handles individual file changes
-func (h *HookManager) processFile(metadata *utils.FileMetadata) error {
+func (h *HookManager) processFile(repoName string, path string, commit string) ([]api.MigrationProto, error) {
+	metadata := &utils.FileMetadata{
+		RepoName: repoName,
+		Path:     path,
+		Commit:   commit,
+	}
 	content, err := utils.GetGitFileFetcher().FetchRawGitFile(*metadata)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to fetch file %s: %w", metadata.Path, err)
 	}
 
-	migrations, err := utils.ParseSQL(content)
+	foundMigrations, err := utils.ParseSQL(content)
 	if err != nil {
-		return err
-	}
-	if len(migrations) == 0 {
+		return nil, err
 	}
 
-	// Parse and add DDL to database.
-	return nil
+	if len(foundMigrations) == 0 {
+		return nil, nil
+	}
+
+	return foundMigrations, nil
 }

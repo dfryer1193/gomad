@@ -2,12 +2,23 @@ package api
 
 import "time"
 
+type MigrationCommonFields struct {
+	Namespace string    `json:"namespace" db:"namespace"`
+	User      string    `json:"user" db:"user"`
+	Comment   string    `json:"comment" db:"comment"`
+	DDL       string    `json:"ddl" db:"ddl"`
+	CreatedAt time.Time `json:"createdAt" db:"createdAt"`
+}
+
+type MigrationProto struct {
+	MigrationCommonFields
+	ShouldSkip bool   `db:"shouldSkip""`
+	Signature  uint64 `db:"id"`
+}
+
 // Migration represents a database migration record
 type Migration struct {
-	ID        int       `db:"id" json:"id"`
-	Namespace string    `db:"namespace" json:"namespace"`
-	User      string    `db:"user" json:"user"`
-	Comment   string    `db:"comment" json:"comment"`
-	DDL       string    `db:"ddl" json:"ddl"`
-	Completed time.Time `db:"completed" json:"completed"`
+	MigrationCommonFields
+	ID          uint64    `json:"id" db:"id"`
+	CompletedAt time.Time `json:"completedAt" db:"completedAt"`
 }

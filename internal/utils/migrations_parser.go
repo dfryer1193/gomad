@@ -3,26 +3,19 @@ package utils
 import (
 	"bufio"
 	"fmt"
+	"github.com/dfryer1193/gomad/api"
 	"hash/fnv"
 	"strings"
+	"time"
 )
-
-type MigrationProto struct {
-	ShouldSkip bool
-	User       string
-	Namespace  string
-	Comment    string
-	DDL        string
-	Signature  uint64
-}
 
 // ParseSQL parses a SQL file content into a slice of MigrationProto structs.
 // The SQL file should have migrations in the format:
 // -- skip?:user:namespace:comment
 // SQL statements...
-func ParseSQL(content string) ([]MigrationProto, error) {
-	var migrations []MigrationProto
-	var currentMigration *MigrationProto
+func ParseSQL(content string) ([]api.MigrationProto, error) {
+	var migrations []api.MigrationProto
+	var currentMigration *api.MigrationProto
 	var ddlBuilder strings.Builder
 	var foundFirstHeader bool
 
@@ -53,6 +46,7 @@ func ParseSQL(content string) ([]MigrationProto, error) {
 				return nil, err
 			}
 			migration.Signature = generateSignature(line)
+			// Technically incorrect for existing migrations, but we'll deal with that when processing
 			currentMigration = migration
 			foundFirstHeader = true
 			continue
@@ -82,7 +76,7 @@ func ParseSQL(content string) ([]MigrationProto, error) {
 }
 
 // parseMigrationHeader parses a comment line in the format "-- skip?:user:namespace:comment"
-func parseMigrationHeader(line string) (*MigrationProto, error) {
+func parseMigrationHeader(line string) (*api.MigrationProto, error) {
 	input := strings.Clone(line)
 
 	input = strings.TrimPrefix(input, "--")
@@ -122,11 +116,14 @@ func parseMigrationHeader(line string) (*MigrationProto, error) {
 		return nil, fmt.Errorf("invalid migration header: comment is empty: %s", line)
 	}
 
-	return &MigrationProto{
+	return &api.MigrationProto{
+		MigrationCommonFields: api.MigrationCommonFields{
+			Namespace: namespace,
+			User:      user,
+			Comment:   comment,
+			CreatedAt: time.Now(),
+		},
 		ShouldSkip: shouldSkip,
-		User:       user,
-		Namespace:  namespace,
-		Comment:    comment,
 	}, nil
 }
 

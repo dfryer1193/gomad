@@ -1,6 +1,6 @@
 module github.com/dfryer1193/gomad
 
-go 1.23.6
+go 1.24
 
 require (
 	github.com/dfryer1193/mjolnir v1.1.0
