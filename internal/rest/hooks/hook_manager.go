@@ -21,19 +21,14 @@ type MigrationManager interface {
 	ProcessMigrations(ctx context.Context, migrations []api.MigrationProto) error
 }
 
-type GitFileFetcher interface {
-	FetchRawGitFile(metadata utils.FileMetadata) (string, error)
-}
-
-type SQLFileParser interface {
-	ParseSQL(content string) ([]api.MigrationProto, error)
+type MigrationFileProcessor interface {
+	ProcessFile(repoName string, path string, commit string) ([]api.MigrationProto, error)
 }
 
 type HookManager struct {
-	secret         string
-	migrationMgr   MigrationManager
-	gitFileFetcher GitFileFetcher
-	sqlFileParser  SQLFileParser
+	secret                 string
+	migrationMgr           MigrationManager
+	migrationFileProcessor MigrationFileProcessor
 }
 
 var (
@@ -49,36 +44,39 @@ func GetHookManager() *HookManager {
 
 	once.Do(func() {
 		mgr = &HookManager{
-			secret:         secret,
-			migrationMgr:   migrations.GetMigrationsManager(),
-			gitFileFetcher: utils.GetGitFileFetcher(),
-			sqlFileParser:  utils.NewMigrationFileParser(),
+			secret:                 secret,
+			migrationMgr:           migrations.GetMigrationsManager(),
+			migrationFileProcessor: utils.GetMigrationFileProcessor(),
 		}
 	})
 
 	return mgr
 }
 
+type Repository struct {
+	Name     string `json:"name"`
+	FullName string `json:"full_name"`
+}
+
+type Commit struct {
+	ID        string   `json:"id"`
+	Message   string   `json:"message"`
+	Timestamp string   `json:"timestamp"`
+	Added     []string `json:"added"`
+	Modified  []string `json:"modified"`
+	Removed   []string `json:"removed"`
+	Author    struct {
+		Name  string `json:"name"`
+		Email string `json:"email"`
+	} `json:"author"`
+}
+
 type PushEvent struct {
-	Ref        string `json:"ref"`
-	Before     string `json:"before"`
-	After      string `json:"after"`
-	Repository struct {
-		Name     string `json:"name"`
-		FullName string `json:"full_name"`
-	} `json:"repository"`
-	Commits []struct {
-		ID        string   `json:"id"`
-		Message   string   `json:"message"`
-		Timestamp string   `json:"timestamp"`
-		Added     []string `json:"added"`
-		Modified  []string `json:"modified"`
-		Removed   []string `json:"removed"`
-		Author    struct {
-			Name  string `json:"name"`
-			Email string `json:"email"`
-		} `json:"author"`
-	} `json:"commits"`
+	Ref        string     `json:"ref"`
+	Before     string     `json:"before"`
+	After      string     `json:"after"`
+	Repository Repository `json:"repository"`
+	Commits    []Commit   `json:"commits"`
 }
 
 // HandlePush handles Git push webhooks
@@ -103,7 +101,22 @@ func (h *HookManager) HandlePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	migrationPrototypes, err := h.processSQLFiles(event)
+	sqlFiles := h.getSQLFiles(event)
+	if len(sqlFiles) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	migrationPrototypes := make([]api.MigrationProto, 0)
+	for _, file := range sqlFiles {
+		proto, err := h.migrationFileProcessor.ProcessFile(event.Repository.FullName, file, event.After)
+		if err != nil {
+			middleware.SetInternalError(r, fmt.Errorf("failed to process SQL file: %w", err))
+		}
+		migrationPrototypes = append(migrationPrototypes, proto...)
+	}
+
+	err = h.migrationMgr.ProcessMigrations(r.Context(), migrationPrototypes)
 	if err != nil {
 		middleware.SetInternalError(r, fmt.Errorf("failed to process SQL changes: %w", err))
 		return
@@ -118,7 +131,6 @@ func (h *HookManager) HandlePush(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// validateSignature validates the webhook signature
 func (h *HookManager) validateSignature(r *http.Request, body []byte) bool {
 	signature := r.Header.Get("X-Hub-Signature-256")
 	if signature == "" {
@@ -134,51 +146,22 @@ func (h *HookManager) validateSignature(r *http.Request, body []byte) bool {
 	return hmac.Equal([]byte(signature), []byte(expectedSignature))
 }
 
-// processSQLFiles handles the changes from the push event
-func (h *HookManager) processSQLFiles(event *PushEvent) ([]api.MigrationProto, error) {
-	migrationPrototypes := make([]api.MigrationProto, 0)
+func (h *HookManager) getSQLFiles(event *PushEvent) []string {
+	sqlFiles := make([]string, 0)
 
 	// Collect all changed files
 	for _, commit := range event.Commits {
 		for _, file := range commit.Added {
 			if strings.HasSuffix(file, ".sql") {
-				protos, err := h.processFile(event.Repository.FullName, file, event.After)
-				if err != nil {
-					return nil, fmt.Errorf("failed to process file %s: %w", file, err)
-				}
-				migrationPrototypes = append(migrationPrototypes, protos...)
+				sqlFiles = append(sqlFiles, file)
 			}
 		}
 		for _, file := range commit.Modified {
 			if strings.HasSuffix(file, ".sql") {
-				protos, err := h.processFile(event.Repository.FullName, file, event.After)
-				if err != nil {
-					return nil, fmt.Errorf("failed to process file %s: %w", file, err)
-				}
-				migrationPrototypes = append(migrationPrototypes, protos...)
+				sqlFiles = append(sqlFiles, file)
 			}
 		}
 	}
 
-	return migrationPrototypes, nil
-}
-
-// processFile handles individual file changes
-func (h *HookManager) processFile(repoName string, path string, commit string) ([]api.MigrationProto, error) {
-	metadata := &utils.FileMetadata{
-		RepoName: repoName,
-		Path:     path,
-		Commit:   commit,
-	}
-	content, err := h.gitFileFetcher.FetchRawGitFile(*metadata)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch file %s: %w", metadata.Path, err)
-	}
-
-	foundMigrations, err := h.sqlFileParser.ParseSQL(content)
-	if err != nil {
-		return nil, err
-	}
-
-	return foundMigrations, nil
+	return sqlFiles
 }

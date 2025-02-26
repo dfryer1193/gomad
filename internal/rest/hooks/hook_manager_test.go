@@ -14,6 +14,12 @@ import (
 	"testing"
 )
 
+const (
+	TEST_SECRET       = "test-secret"
+	TEST_SQL_PATH     = "test.sql"
+	TEST_NON_SQL_PATH = "test.txt"
+)
+
 // Mock implementations
 type mockMigrationManager struct {
 	migrations []api.MigrationProto
@@ -48,6 +54,68 @@ func (m *mockSQLFileParser) ParseSQL(_ string) ([]api.MigrationProto, error) {
 		return nil, m.err
 	}
 	return m.migrations, nil
+}
+
+func TestHandlePush(t *testing.T) {
+	testCases := []struct {
+		name       string
+		event      *PushEvent
+		secret     string
+		wantStatus int
+	}{
+		{
+			name:       "bad json payload",
+			event:      nil,
+			secret:     TEST_SECRET,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "bad signature",
+			event: &PushEvent{
+				Ref: "refs/heads/master",
+			},
+			secret:     "wrong-secret",
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "non-master branch",
+			event: &PushEvent{
+				Ref: "refs/heads/develop",
+				Commits: []Commit{
+					{
+						Added: []string{TEST_SQL_PATH},
+					},
+				},
+			},
+			secret:     TEST_SECRET,
+			wantStatus: http.StatusNoContent,
+		},
+		{
+			name: "no sql files",
+			event: &PushEvent{
+				Ref: "refs/heads/master",
+				Commits: []Commit{
+					{
+						Added: []string{TEST_NON_SQL_PATH},
+					},
+				},
+			},
+			secret:     TEST_SECRET,
+			wantStatus: http.StatusNoContent,
+		},
+		{
+			name: "error processing sql files",
+			event: &PushEvent{
+				Ref: "refs/heads/master",
+				Commits: []Commit{
+					{
+						Added: []string{TEST_SQL_PATH},
+					},
+				},
+			},
+			secret: TEST_SECRET,
+		},
+	}
 }
 
 func TestProcessFile(t *testing.T) {
