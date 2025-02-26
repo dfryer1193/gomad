@@ -361,9 +361,9 @@ func TestParseMigrationHeader(t *testing.T) {
 }
 
 const (
-	TEST_REPO_NAME = "test/repo"
-	TEST_PATH      = "test/path"
-	TEST_COMMIT    = "test commit"
+	testRepoName = "test/repo"
+	testPath     = "test/path"
+	testCommit   = "test commit"
 )
 
 type errorFileFetcher struct{}
@@ -405,7 +405,7 @@ func TestProcessFile(t *testing.T) {
 			fetcher:           errorFileFetcher{},
 			parser:            nil,
 			expectsMigrations: false,
-			wantErrMsg:        "failed to fetch file " + TEST_PATH,
+			wantErrMsg:        "failed to fetch file " + testPath,
 		},
 		{
 			name: "parsing error",
@@ -414,7 +414,7 @@ func TestProcessFile(t *testing.T) {
 			},
 			parser:            errorSQLFileParser{},
 			expectsMigrations: false,
-			wantErrMsg:        "error parsing sql file " + TEST_PATH,
+			wantErrMsg:        "error parsing sql file " + testPath,
 		},
 		{
 			name: "normal case",
@@ -433,7 +433,7 @@ func TestProcessFile(t *testing.T) {
 			p.fileFetcher = tc.fetcher
 			p.fileParser = tc.parser
 
-			migrations, err := p.ProcessFile(TEST_REPO_NAME, TEST_PATH, TEST_COMMIT)
+			migrations, err := p.ProcessFile(testRepoName, testPath, testCommit)
 			if len(tc.wantErrMsg) != 0 && err == nil {
 				t.Errorf("Expected error %s, but no error was returned", tc.wantErrMsg)
 			}
