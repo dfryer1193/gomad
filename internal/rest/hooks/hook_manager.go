@@ -2,9 +2,6 @@ package hooks
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"github.com/dfryer1193/gomad/api"
 	"github.com/dfryer1193/gomad/internal/rest/migrations"
@@ -24,8 +21,12 @@ type MigrationFileProcessor interface {
 	ProcessFile(repoName string, path string, commit string) ([]api.MigrationProto, error)
 }
 
+type SignatureValidator interface {
+	ValidateSignature(r *http.Request, body []byte) bool
+}
+
 type HookManager struct {
-	secret                 string
+	validator              SignatureValidator
 	migrationMgr           MigrationManager
 	migrationFileProcessor MigrationFileProcessor
 }
@@ -43,7 +44,7 @@ func GetHookManager() *HookManager {
 
 	once.Do(func() {
 		mgr = &HookManager{
-			secret:                 secret,
+			validator:              utils.NewSignatureValidator(secret),
 			migrationMgr:           migrations.GetMigrationsManager(),
 			migrationFileProcessor: utils.GetMigrationFileProcessor(),
 		}
@@ -88,7 +89,7 @@ func (h *HookManager) HandlePush(w http.ResponseWriter, r *http.Request) *mjolni
 	}
 
 	// Validate webhook signature
-	if !h.validateSignature(r, bodyBytes) {
+	if !h.validator.ValidateSignature(r, bodyBytes) {
 		return mjolnirUtils.UnauthorizedErr(fmt.Errorf("Invalid webhook signature"))
 	}
 
@@ -118,28 +119,8 @@ func (h *HookManager) HandlePush(w http.ResponseWriter, r *http.Request) *mjolni
 		return mjolnirUtils.InternalServerErr(fmt.Errorf("failed to process SQL changes: %w", err))
 	}
 
-	err = h.migrationMgr.ProcessMigrations(r.Context(), migrationPrototypes)
-	if err != nil {
-		return mjolnirUtils.InternalServerErr(fmt.Errorf("failed to process migrations: %w", err))
-	}
-
 	w.WriteHeader(http.StatusNoContent)
 	return nil
-}
-
-func (h *HookManager) validateSignature(r *http.Request, body []byte) bool {
-	signature := r.Header.Get("X-Hub-Signature-256")
-	if signature == "" {
-		return false
-	}
-
-	signature = strings.TrimPrefix(signature, "sha256=")
-
-	mac := hmac.New(sha256.New, []byte(h.secret))
-	mac.Write(body)
-	expectedSignature := hex.EncodeToString(mac.Sum(nil))
-
-	return hmac.Equal([]byte(signature), []byte(expectedSignature))
 }
 
 func (h *HookManager) getSQLFiles(event *PushEvent) []string {

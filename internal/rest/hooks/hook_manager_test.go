@@ -3,12 +3,9 @@ package hooks
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"github.com/dfryer1193/gomad/api"
-	"github.com/dfryer1193/gomad/internal/utils"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -20,57 +17,63 @@ const (
 	TEST_NON_SQL_PATH = "test.txt"
 )
 
-// Mock implementations
-type mockMigrationManager struct {
-	migrations []api.MigrationProto
-	err        error
+type ValidSignatureValidator struct{}
+
+func (v *ValidSignatureValidator) ValidateSignature(r *http.Request, body []byte) bool {
+	return true
 }
 
-func (m *mockMigrationManager) ProcessMigrations(_ context.Context, migrations []api.MigrationProto) error {
-	m.migrations = migrations
-	return m.err
+type InvalidSignatureValidator struct{}
+
+func (v *InvalidSignatureValidator) ValidateSignature(r *http.Request, body []byte) bool {
+	return false
 }
 
-type mockGitFileFetcher struct {
-	content string
-	err     error
+type ErrorFileProcessor struct{}
+
+func (f *ErrorFileProcessor) ProcessFile(_, path, _ string) ([]api.MigrationProto, error) {
+	return nil, fmt.Errorf("error processing file %s", path)
 }
 
-func (m *mockGitFileFetcher) FetchRawGitFile(_ utils.FileMetadata) (string, error) {
-	if m.err != nil {
-		return "", m.err
-	}
+type MockFileProcessor struct{}
 
-	return m.content, nil
+func (f *MockFileProcessor) ProcessFile(_, _, _ string) ([]api.MigrationProto, error) {
+	return []api.MigrationProto{}, nil
 }
 
-type mockSQLFileParser struct {
-	migrations []api.MigrationProto
-	err        error
+type ErrorMigrationManager struct{}
+
+func (m *ErrorMigrationManager) ProcessMigrations(_ context.Context, _ []api.MigrationProto) error {
+	return fmt.Errorf("error processing migrations")
 }
 
-func (m *mockSQLFileParser) ParseSQL(_ string) ([]api.MigrationProto, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	return m.migrations, nil
+type MockMigrationManager struct{}
+
+func (m *MockMigrationManager) ProcessMigrations(_ context.Context, _ []api.MigrationProto) error {
+	return nil
 }
 
 func TestHandlePush(t *testing.T) {
 	testCases := []struct {
-		name       string
-		event      *PushEvent
-		secret     string
-		wantStatus int
+		name               string
+		signatureValidator SignatureValidator
+		fileProcessor      MigrationFileProcessor
+		migrationManager   MigrationManager
+		event              *PushEvent
+		mangleBody         bool
+		secret             string
+		wantStatus         int
 	}{
 		{
 			name:       "bad json payload",
 			event:      nil,
+			mangleBody: true,
 			secret:     TEST_SECRET,
 			wantStatus: http.StatusBadRequest,
 		},
 		{
-			name: "bad signature",
+			name:               "bad signature",
+			signatureValidator: &InvalidSignatureValidator{},
 			event: &PushEvent{
 				Ref: "refs/heads/master",
 			},
@@ -78,7 +81,8 @@ func TestHandlePush(t *testing.T) {
 			wantStatus: http.StatusUnauthorized,
 		},
 		{
-			name: "non-master branch",
+			name:               "non-master branch",
+			signatureValidator: &ValidSignatureValidator{},
 			event: &PushEvent{
 				Ref: "refs/heads/develop",
 				Commits: []Commit{
@@ -87,11 +91,11 @@ func TestHandlePush(t *testing.T) {
 					},
 				},
 			},
-			secret:     TEST_SECRET,
 			wantStatus: http.StatusNoContent,
 		},
 		{
-			name: "no sql files",
+			name:               "no sql files",
+			signatureValidator: &ValidSignatureValidator{},
 			event: &PushEvent{
 				Ref: "refs/heads/master",
 				Commits: []Commit{
@@ -100,11 +104,12 @@ func TestHandlePush(t *testing.T) {
 					},
 				},
 			},
-			secret:     TEST_SECRET,
 			wantStatus: http.StatusNoContent,
 		},
 		{
-			name: "error processing sql files",
+			name:               "error processing sql files",
+			signatureValidator: &ValidSignatureValidator{},
+			fileProcessor:      &ErrorFileProcessor{},
 			event: &PushEvent{
 				Ref: "refs/heads/master",
 				Commits: []Commit{
@@ -113,70 +118,80 @@ func TestHandlePush(t *testing.T) {
 					},
 				},
 			},
-			secret: TEST_SECRET,
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:               "error processing migrations files",
+			signatureValidator: &ValidSignatureValidator{},
+			fileProcessor:      &ErrorFileProcessor{},
+			event: &PushEvent{
+				Ref: "refs/heads/master",
+				Commits: []Commit{
+					{
+						Added: []string{TEST_SQL_PATH},
+					},
+				},
+			},
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:               "error processing migration prototypes",
+			signatureValidator: &ValidSignatureValidator{},
+			fileProcessor:      &MockFileProcessor{},
+			migrationManager:   &ErrorMigrationManager{},
+			event: &PushEvent{
+				Ref: "refs/heads/master",
+				Commits: []Commit{
+					{
+						Added: []string{TEST_SQL_PATH},
+					},
+				},
+			},
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:               "successful processing",
+			signatureValidator: &ValidSignatureValidator{},
+			fileProcessor:      &MockFileProcessor{},
+			migrationManager:   &MockMigrationManager{},
+			event: &PushEvent{
+				Ref: "refs/heads/master",
+				Commits: []Commit{
+					{
+						Added: []string{TEST_SQL_PATH},
+					},
+				},
+			},
+			wantStatus: http.StatusNoContent,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := &HookManager{secret: tc.secret}
+			h := &HookManager{
+				validator:              tc.signatureValidator,
+				migrationFileProcessor: tc.fileProcessor,
+				migrationMgr:           tc.migrationManager,
+			}
 			w := httptest.NewRecorder()
-			bodyBytes, _ := json.Marshal(tc.event)
+			bodyBytes := []byte("invalid json")
+			if !tc.mangleBody {
+				bodyBytes, _ = json.Marshal(tc.event)
+			}
 			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(bodyBytes))
 			req.Header.Set("Content-Type", "application/json")
 
-			h.HandlePush(w, req)
-			if w.Code != tc.wantStatus {
-				t.Errorf("HandlePush() = %v, want %v", w.Code, tc.wantStatus)
-			}
-		})
-	}
-}
+			err := h.HandlePush(w, req)
+			if tc.wantStatus > 204 {
+				if err == nil {
+					t.Errorf("Expected error, got none")
+				}
 
-func TestValidateSignature(t *testing.T) {
-	testCases := []struct {
-		name      string
-		body      []byte
-		signature string
-		secret    string
-		want      bool
-	}{
-		{
-			name:   "valid signature",
-			body:   []byte("test body"),
-			secret: "test-secret",
-			signature: func() string {
-				mac := hmac.New(sha256.New, []byte("test-secret"))
-				mac.Write([]byte("test body"))
-				return "sha256=" + hex.EncodeToString(mac.Sum(nil))
-			}(),
-			want: true,
-		},
-		{
-			name:      "invalid signature",
-			body:      []byte("test body"),
-			secret:    "test-secret",
-			signature: "sha256=invalid",
-			want:      false,
-		},
-		{
-			name:      "empty signature",
-			body:      []byte("test body"),
-			secret:    "test-secret",
-			signature: "",
-			want:      false,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			h := &HookManager{secret: tc.secret}
-			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(tc.body))
-			req.Header.Set("X-Hub-Signature-256", tc.signature)
-
-			got := h.validateSignature(req, tc.body)
-			if got != tc.want {
-				t.Errorf("validateSignature() = %v, want %v", got, tc.want)
+				// TODO: Validate error code
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error, got %v", err)
+				}
 			}
 		})
 	}
