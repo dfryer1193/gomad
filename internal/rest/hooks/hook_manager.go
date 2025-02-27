@@ -9,7 +9,6 @@ import (
 	"github.com/dfryer1193/gomad/api"
 	"github.com/dfryer1193/gomad/internal/rest/migrations"
 	"github.com/dfryer1193/gomad/internal/utils"
-	"github.com/dfryer1193/mjolnir/middleware"
 	mjolnirUtils "github.com/dfryer1193/mjolnir/utils"
 	"net/http"
 	"os"
@@ -79,56 +78,53 @@ type PushEvent struct {
 	Commits    []Commit   `json:"commits"`
 }
 
-// HandlePush handles Git push webhooks
-func (h *HookManager) HandlePush(w http.ResponseWriter, r *http.Request) {
+// HandlePush handles Git push webhooks by looking for added or modified sql files and treating them as migrations files
+func (h *HookManager) HandlePush(w http.ResponseWriter, r *http.Request) *mjolnirUtils.ApiError {
 	// Read the raw body
 	event := &PushEvent{}
 	bodyBytes, err := mjolnirUtils.DecodeJSON(r, event)
 	if err != nil {
-		middleware.SetBadRequestError(r, fmt.Errorf("failed to decode JSON: %w", err))
-		return
+		return mjolnirUtils.BadRequestErr(fmt.Errorf("failed to decode JSON: %w", err))
 	}
 
 	// Validate webhook signature
 	if !h.validateSignature(r, bodyBytes) {
-		middleware.SetUnauthorizedError(r, fmt.Errorf("Invalid webhook signature"))
-		return
+		return mjolnirUtils.UnauthorizedErr(fmt.Errorf("Invalid webhook signature"))
 	}
 
 	// Only process pushes to master branch
 	if event.Ref != "refs/heads/master" {
 		w.WriteHeader(http.StatusNoContent)
-		return
+		return nil
 	}
 
 	sqlFiles := h.getSQLFiles(event)
 	if len(sqlFiles) == 0 {
 		w.WriteHeader(http.StatusNoContent)
-		return
+		return nil
 	}
 
 	migrationPrototypes := make([]api.MigrationProto, 0)
 	for _, file := range sqlFiles {
 		proto, err := h.migrationFileProcessor.ProcessFile(event.Repository.FullName, file, event.After)
 		if err != nil {
-			middleware.SetInternalError(r, fmt.Errorf("failed to process SQL file: %w", err))
+			return mjolnirUtils.InternalServerErr(fmt.Errorf("failed to process SQL file: %s", file))
 		}
 		migrationPrototypes = append(migrationPrototypes, proto...)
 	}
 
 	err = h.migrationMgr.ProcessMigrations(r.Context(), migrationPrototypes)
 	if err != nil {
-		middleware.SetInternalError(r, fmt.Errorf("failed to process SQL changes: %w", err))
-		return
+		return mjolnirUtils.InternalServerErr(fmt.Errorf("failed to process SQL changes: %w", err))
 	}
 
 	err = h.migrationMgr.ProcessMigrations(r.Context(), migrationPrototypes)
 	if err != nil {
-		middleware.SetInternalError(r, fmt.Errorf("failed to process migrations: %w", err))
-		return
+		return mjolnirUtils.InternalServerErr(fmt.Errorf("failed to process migrations: %w", err))
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 func (h *HookManager) validateSignature(r *http.Request, body []byte) bool {
