@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/dfryer1193/gomad/api"
@@ -41,15 +40,15 @@ func (f *MockFileProcessor) ProcessFile(_, _, _ string) ([]api.MigrationProto, e
 	return []api.MigrationProto{}, nil
 }
 
-type ErrorMigrationManager struct{}
+type ErrorMigrationProcessor struct{}
 
-func (m *ErrorMigrationManager) ProcessMigrations(_ context.Context, _ []api.MigrationProto) error {
+func (m *ErrorMigrationProcessor) ProcessMigrations(_ []api.MigrationProto) error {
 	return fmt.Errorf("error processing migrations")
 }
 
-type MockMigrationManager struct{}
+type MockMigrationProcessor struct{}
 
-func (m *MockMigrationManager) ProcessMigrations(_ context.Context, _ []api.MigrationProto) error {
+func (m *MockMigrationProcessor) ProcessMigrations(_ []api.MigrationProto) error {
 	return nil
 }
 
@@ -58,7 +57,7 @@ func TestHandlePush(t *testing.T) {
 		name               string
 		signatureValidator SignatureValidator
 		fileProcessor      MigrationFileProcessor
-		migrationManager   MigrationManager
+		migrationManager   MigrationProcessor
 		event              *PushEvent
 		mangleBody         bool
 		secret             string
@@ -138,7 +137,7 @@ func TestHandlePush(t *testing.T) {
 			name:               "error processing migration prototypes",
 			signatureValidator: &ValidSignatureValidator{},
 			fileProcessor:      &MockFileProcessor{},
-			migrationManager:   &ErrorMigrationManager{},
+			migrationManager:   &ErrorMigrationProcessor{},
 			event: &PushEvent{
 				Ref: "refs/heads/master",
 				Commits: []Commit{
@@ -153,7 +152,7 @@ func TestHandlePush(t *testing.T) {
 			name:               "successful processing",
 			signatureValidator: &ValidSignatureValidator{},
 			fileProcessor:      &MockFileProcessor{},
-			migrationManager:   &MockMigrationManager{},
+			migrationManager:   &MockMigrationProcessor{},
 			event: &PushEvent{
 				Ref: "refs/heads/master",
 				Commits: []Commit{
