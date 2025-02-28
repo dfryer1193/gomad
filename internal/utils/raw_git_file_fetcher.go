@@ -16,7 +16,7 @@ type FileMetadata struct {
 	Commit   string
 }
 
-type MinimalGitHubFileData struct {
+type minimalGitHubFileData struct {
 	Content  string `json:"content"`
 	Encoding string `json:"encoding"`
 	Size     int    `json:"size"`
@@ -76,7 +76,7 @@ func (f *GitFileFetcher) FetchRawGitFile(metadata FileMetadata) (string, error) 
 		return "", fmt.Errorf("GitHub API returned status %d for file: %s", resp.StatusCode, fetchUrl)
 	}
 
-	var fileContent MinimalGitHubFileData
+	var fileContent minimalGitHubFileData
 	if err := json.NewDecoder(resp.Body).Decode(&fileContent); err != nil {
 		return "", fmt.Errorf("failed to decode response: %w", err)
 	}

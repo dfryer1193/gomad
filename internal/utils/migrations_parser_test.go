@@ -1,25 +1,31 @@
 package utils
 
-import "testing"
+import (
+	"fmt"
+	"github.com/dfryer1193/gomad/api"
+	"testing"
+)
 
 func TestParseSQL(t *testing.T) {
 	tests := []struct {
 		name    string
 		content string
-		want    []MigrationProto
+		want    []api.MigrationProto
 		wantErr bool
 	}{
 		{
 			name: "single migration",
 			content: `-- :user1:ns1:comment1
 CREATE TABLE users (id INT);`,
-			want: []MigrationProto{
+			want: []api.MigrationProto{
 				{
+					MigrationCommonFields: api.MigrationCommonFields{
+						User:      "user1",
+						Namespace: "ns1",
+						Comment:   "comment1",
+						DDL:       "CREATE TABLE users (id INT);",
+					},
 					ShouldSkip: false,
-					User:       "user1",
-					Namespace:  "ns1",
-					Comment:    "comment1",
-					DDL:        "CREATE TABLE users (id INT);",
 					Signature:  4193559969700021025,
 				},
 			},
@@ -32,21 +38,25 @@ CREATE TABLE users (id INT);
 
 -- skip:user2:ns2:comment2
 ALTER TABLE users ADD COLUMN name TEXT;`,
-			want: []MigrationProto{
+			want: []api.MigrationProto{
 				{
+					MigrationCommonFields: api.MigrationCommonFields{
+						User:      "user1",
+						Namespace: "ns1",
+						Comment:   "comment1",
+						DDL:       "CREATE TABLE users (id INT);",
+					},
 					ShouldSkip: false,
-					User:       "user1",
-					Namespace:  "ns1",
-					Comment:    "comment1",
-					DDL:        "CREATE TABLE users (id INT);",
 					Signature:  4193559969700021025,
 				},
 				{
+					MigrationCommonFields: api.MigrationCommonFields{
+						User:      "user2",
+						Namespace: "ns2",
+						Comment:   "comment2",
+						DDL:       "ALTER TABLE users ADD COLUMN name TEXT;",
+					},
 					ShouldSkip: true,
-					User:       "user2",
-					Namespace:  "ns2",
-					Comment:    "comment2",
-					DDL:        "ALTER TABLE users ADD COLUMN name TEXT;",
 					Signature:  9442060313613740461,
 				},
 			},
@@ -59,13 +69,15 @@ CREATE TABLE users (
     id INT,
     name TEXT
 );`,
-			want: []MigrationProto{
+			want: []api.MigrationProto{
 				{
+					MigrationCommonFields: api.MigrationCommonFields{
+						User:      "user1",
+						Namespace: "ns1",
+						Comment:   "comment1",
+						DDL:       "CREATE TABLE users (\n    id INT,\n    name TEXT\n);",
+					},
 					ShouldSkip: false,
-					User:       "user1",
-					Namespace:  "ns1",
-					Comment:    "comment1",
-					DDL:        "CREATE TABLE users (\n    id INT,\n    name TEXT\n);",
 					Signature:  4193559969700021025,
 				},
 			},
@@ -74,13 +86,13 @@ CREATE TABLE users (
 		{
 			name:    "empty content",
 			content: "",
-			want:    []MigrationProto{},
+			want:    []api.MigrationProto{},
 			wantErr: false,
 		},
 		{
 			name:    "only whitespace",
 			content: "   \n\t\n  ",
-			want:    []MigrationProto{},
+			want:    []api.MigrationProto{},
 			wantErr: false,
 		},
 		{
@@ -93,13 +105,13 @@ CREATE TABLE users;`,
 		{
 			name:    "missing SQL after header",
 			content: "-- :user1:ns1:comment1",
-			want:    []MigrationProto{},
+			want:    []api.MigrationProto{},
 			wantErr: false,
 		},
 		{
 			name:    "SQL without header",
 			content: "CREATE TABLE users;",
-			want:    []MigrationProto{},
+			want:    []api.MigrationProto{},
 			wantErr: true,
 		},
 		{
@@ -124,7 +136,8 @@ CREATE TABLE users;`,
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseSQL(tt.content)
+			parser := GetMigrationFileParser()
+			got, err := parser.ParseSQL(tt.content)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseSQL() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -203,39 +216,45 @@ func TestParseMigrationHeader(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   string
-		want    *MigrationProto
+		want    *api.MigrationProto
 		wantErr bool
 	}{
 		{
 			name:  "header without skip",
 			input: "-- :username:prod:create users table",
-			want: &MigrationProto{
+			want: &api.MigrationProto{
+				MigrationCommonFields: api.MigrationCommonFields{
+					User:      "username",
+					Namespace: "prod",
+					Comment:   "create users table",
+				},
 				ShouldSkip: false,
-				User:       "username",
-				Namespace:  "prod",
-				Comment:    "create users table",
 			},
 			wantErr: false,
 		},
 		{
 			name:  "header with skip",
 			input: "-- skip:janedoe:staging:alter users table",
-			want: &MigrationProto{
+			want: &api.MigrationProto{
+				MigrationCommonFields: api.MigrationCommonFields{
+					User:      "janedoe",
+					Namespace: "staging",
+					Comment:   "alter users table",
+				},
 				ShouldSkip: true,
-				User:       "janedoe",
-				Namespace:  "staging",
-				Comment:    "alter users table",
 			},
 			wantErr: false,
 		},
 		{
 			name:  "header with extra spaces",
 			input: "--   skip  :  admin  :  test  :  add index  ",
-			want: &MigrationProto{
+			want: &api.MigrationProto{
+				MigrationCommonFields: api.MigrationCommonFields{
+					User:      "admin",
+					Namespace: "test",
+					Comment:   "add index",
+				},
 				ShouldSkip: true,
-				User:       "admin",
-				Namespace:  "test",
-				Comment:    "add index",
 			},
 			wantErr: false,
 		},
@@ -290,22 +309,26 @@ func TestParseMigrationHeader(t *testing.T) {
 		{
 			name:  "case-insensitive skip",
 			input: "-- SKIP:user:ns:comment",
-			want: &MigrationProto{
+			want: &api.MigrationProto{
+				MigrationCommonFields: api.MigrationCommonFields{
+					User:      "user",
+					Namespace: "ns",
+					Comment:   "comment",
+				},
 				ShouldSkip: true,
-				User:       "user",
-				Namespace:  "ns",
-				Comment:    "comment",
 			},
 			wantErr: false,
 		},
 		{
 			name:  "header with special characters in comment",
 			input: "-- skip:user:ns:comment with: special! @#$%^&* chars",
-			want: &MigrationProto{
+			want: &api.MigrationProto{
+				MigrationCommonFields: api.MigrationCommonFields{
+					User:      "user",
+					Namespace: "ns",
+					Comment:   "comment with: special! @#$%^&* chars",
+				},
 				ShouldSkip: true,
-				User:       "user",
-				Namespace:  "ns",
-				Comment:    "comment with: special! @#$%^&* chars",
 			},
 			wantErr: false,
 		},
@@ -332,6 +355,99 @@ func TestParseMigrationHeader(t *testing.T) {
 			}
 			if got.Comment != tt.want.Comment {
 				t.Errorf("Comment = %v, want %v", got.Comment, tt.want.Comment)
+			}
+		})
+	}
+}
+
+const (
+	testRepoName = "test/repo"
+	testPath     = "test/path"
+	testCommit   = "test commit"
+)
+
+type errorFileFetcher struct{}
+
+func (f errorFileFetcher) FetchRawGitFile(metadata FileMetadata) (string, error) {
+	return "", fmt.Errorf("error fetching file %s", metadata.Path)
+}
+
+type mockFileFetcher struct {
+	content string
+}
+
+func (f mockFileFetcher) FetchRawGitFile(metadata FileMetadata) (string, error) {
+	return f.content, nil
+}
+
+type errorSQLFileParser struct{}
+
+func (p errorSQLFileParser) ParseSQL(_ string) ([]api.MigrationProto, error) {
+	return nil, fmt.Errorf("error parsing SQL")
+}
+
+type mockSQLFileParser struct{}
+
+func (p mockSQLFileParser) ParseSQL(_ string) ([]api.MigrationProto, error) {
+	return make([]api.MigrationProto, 1), nil
+}
+
+func TestProcessFile(t *testing.T) {
+	testCases := []struct {
+		name              string
+		fetcher           gitFileFetcher
+		parser            sqlFileParser
+		expectsMigrations bool
+		wantErrMsg        string
+	}{
+		{
+			name:              "error fetching file",
+			fetcher:           errorFileFetcher{},
+			parser:            nil,
+			expectsMigrations: false,
+			wantErrMsg:        "failed to fetch file " + testPath,
+		},
+		{
+			name: "parsing error",
+			fetcher: mockFileFetcher{
+				content: "test content",
+			},
+			parser:            errorSQLFileParser{},
+			expectsMigrations: false,
+			wantErrMsg:        "error parsing sql file " + testPath,
+		},
+		{
+			name: "normal case",
+			fetcher: mockFileFetcher{
+				content: "-- :user1:ns1:comment1\nCREATE TABLE users (id INT);",
+			},
+			parser:            mockSQLFileParser{},
+			expectsMigrations: true,
+			wantErrMsg:        "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := GetMigrationFileProcessor()
+			p.fileFetcher = tc.fetcher
+			p.fileParser = tc.parser
+
+			migrations, err := p.ProcessFile(testRepoName, testPath, testCommit)
+			if len(tc.wantErrMsg) != 0 && err == nil {
+				t.Errorf("Expected error %s, but no error was returned", tc.wantErrMsg)
+			}
+
+			if len(tc.wantErrMsg) == 0 && err != nil {
+				t.Errorf("Expected no error, but got %s", err.Error())
+			}
+
+			if tc.expectsMigrations && len(migrations) == 0 {
+				t.Errorf("Expected migrations, but got none")
+			}
+
+			if !tc.expectsMigrations && len(migrations) != 0 {
+				t.Errorf("Expected no migrations, but got %d", len(migrations))
 			}
 		})
 	}

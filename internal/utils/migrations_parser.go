@@ -9,11 +9,17 @@ import (
 	"time"
 )
 
+type MigrationFileParser struct{}
+
+func GetMigrationFileParser() *MigrationFileParser {
+	return &MigrationFileParser{}
+}
+
 // ParseSQL parses a SQL file content into a slice of MigrationProto structs.
 // The SQL file should have migrations in the format:
 // -- skip?:user:namespace:comment
 // SQL statements...
-func ParseSQL(content string) ([]api.MigrationProto, error) {
+func (p *MigrationFileParser) ParseSQL(content string) ([]api.MigrationProto, error) {
 	var migrations []api.MigrationProto
 	var currentMigration *api.MigrationProto
 	var ddlBuilder strings.Builder
@@ -131,4 +137,44 @@ func generateSignature(header string) uint64 {
 	h := fnv.New64a()
 	h.Write([]byte(header))
 	return h.Sum64()
+}
+
+type MigrationFileProcessor struct {
+	fileFetcher gitFileFetcher
+	fileParser  sqlFileParser
+}
+
+type gitFileFetcher interface {
+	FetchRawGitFile(metadata FileMetadata) (string, error)
+}
+
+type sqlFileParser interface {
+	ParseSQL(content string) ([]api.MigrationProto, error)
+}
+
+func GetMigrationFileProcessor() *MigrationFileProcessor {
+	return &MigrationFileProcessor{
+		fileFetcher: GetGitFileFetcher(),
+		fileParser:  GetMigrationFileParser(),
+	}
+}
+
+// ProcessFile handles fetching and parsing migration files
+func (fp *MigrationFileProcessor) ProcessFile(repoName string, path string, commit string) ([]api.MigrationProto, error) {
+	metadata := &FileMetadata{
+		RepoName: repoName,
+		Path:     path,
+		Commit:   commit,
+	}
+	content, err := fp.fileFetcher.FetchRawGitFile(*metadata)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch file %s: %w", metadata.Path, err)
+	}
+
+	foundMigrations, err := fp.fileParser.ParseSQL(content)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing sql file %s: %w", metadata.Path, err)
+	}
+
+	return foundMigrations, nil
 }
