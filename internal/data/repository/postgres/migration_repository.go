@@ -37,7 +37,7 @@ func GetMigrationRepository() repository.MigrationRepository {
 	return migrationRepo
 }
 
-func (r *migrationRepository) GetFilteredBySignature(ctx context.Context, signatures []uint64) ([]*api.Migration, error) {
+func (r *migrationRepository) GetFilteredBySignature(signatures []uint64) ([]*api.Migration, error) {
 	if len(signatures) == 0 {
 		return []*api.Migration{}, nil
 	}
@@ -48,7 +48,7 @@ func (r *migrationRepository) GetFilteredBySignature(ctx context.Context, signat
 		WHERE id = ANY($1)
 		ORDER BY Created ASC`
 
-	migrations, err := r.queryMigrations(ctx, query, signatures)
+	migrations, err := r.queryMigrations(query, signatures)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (r *migrationRepository) GetFilteredBySignature(ctx context.Context, signat
 	return migrations, nil
 }
 
-func (r *migrationRepository) BulkInsert(ctx context.Context, migrations []*api.MigrationProto) error {
+func (r *migrationRepository) BulkInsert(migrations []*api.MigrationProto) error {
 	if len(migrations) == 0 {
 		return nil
 	}
@@ -78,7 +78,7 @@ func (r *migrationRepository) BulkInsert(ctx context.Context, migrations []*api.
 
 	// Use CopyFrom for efficient bulk insert
 	_, err := r.pool.CopyFrom(
-		ctx,
+		context.Background(),
 		pgx.Identifier{"migrations"},
 		columns,
 		pgx.CopyFromRows(rows),
@@ -94,8 +94,8 @@ func (r *migrationRepository) Close() {
 	r.pool.Close()
 }
 
-func (r *migrationRepository) queryMigrations(ctx context.Context, query string, args ...any) ([]*api.Migration, error) {
-	rows, err := r.pool.Query(ctx, query, args...)
+func (r *migrationRepository) queryMigrations(query string, args ...any) ([]*api.Migration, error) {
+	rows, err := r.pool.Query(context.Background(), query, args...)
 	if err != nil {
 		return nil, err
 	}

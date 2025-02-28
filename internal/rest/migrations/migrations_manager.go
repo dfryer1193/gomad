@@ -1,7 +1,6 @@
 package migrations
 
 import (
-	"context"
 	"fmt"
 	"github.com/dfryer1193/gomad/api"
 	"github.com/dfryer1193/gomad/internal/data/repository"
@@ -35,20 +34,20 @@ func (mgr *MigrationManager) Close() {
 	mgr.migrations.Close()
 }
 
-func (mgr *MigrationManager) ProcessMigrations(ctx context.Context, pending []api.MigrationProto) error {
-	incomplete, err := mgr.filterCompleted(ctx, pending)
+func (mgr *MigrationManager) ProcessMigrations(pending []api.MigrationProto) error {
+	incomplete, err := mgr.filterCompleted(pending)
 	if err != nil {
 		return fmt.Errorf("failed to fetch migrations while processing migrations: %w", err)
 	}
 
-	err = mgr.migrations.BulkInsert(ctx, incomplete)
+	err = mgr.migrations.BulkInsert(incomplete)
 	if err != nil {
 		return fmt.Errorf("failed to bulk insert migrations: %w", err)
 	}
 	return nil
 }
 
-func (mgr *MigrationManager) filterCompleted(ctx context.Context, pending []api.MigrationProto) ([]*api.MigrationProto, error) {
+func (mgr *MigrationManager) filterCompleted(pending []api.MigrationProto) ([]*api.MigrationProto, error) {
 	sigMap := make(map[uint64]*api.MigrationProto)
 	signatures := make([]uint64, 0, len(pending))
 	for idx := range pending {
@@ -56,7 +55,7 @@ func (mgr *MigrationManager) filterCompleted(ctx context.Context, pending []api.
 		signatures = append(signatures, pending[idx].Signature)
 	}
 
-	existing, err := mgr.migrations.GetFilteredBySignature(ctx, signatures)
+	existing, err := mgr.migrations.GetFilteredBySignature(signatures)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch migrations: %w", err)
 	}
