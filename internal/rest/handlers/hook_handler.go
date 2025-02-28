@@ -1,10 +1,9 @@
 package handlers
 
 import (
-	"context"
 	"fmt"
 	"github.com/dfryer1193/gomad/api"
-	"github.com/dfryer1193/gomad/internal/rest/migrations"
+	"github.com/dfryer1193/gomad/internal/rest/managers"
 	"github.com/dfryer1193/gomad/internal/utils"
 	mjolnirUtils "github.com/dfryer1193/mjolnir/utils"
 	"net/http"
@@ -80,7 +79,7 @@ type PushEvent struct {
 }
 
 // HandlePush handles Git push webhooks by looking for added or modified sql files and treating them as migrations files
-func (h *HookManager) HandlePush(w http.ResponseWriter, r *http.Request) *mjolnirUtils.ApiError {
+func (h *HookHandler) HandlePush(w http.ResponseWriter, r *http.Request) *mjolnirUtils.ApiError {
 	// Read the raw body
 	event := &PushEvent{}
 	bodyBytes, err := mjolnirUtils.DecodeJSON(r, event)
