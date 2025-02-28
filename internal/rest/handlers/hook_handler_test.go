@@ -168,7 +168,7 @@ func TestHandlePush(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := &HookManager{
+			h := &HookHandler{
 				validator:              tc.signatureValidator,
 				migrationFileProcessor: tc.fileProcessor,
 				migrationMgr:           tc.migrationManager,

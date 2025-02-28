@@ -13,8 +13,8 @@ import (
 	"sync"
 )
 
-type MigrationManager interface {
-	ProcessMigrations(ctx context.Context, migrations []api.MigrationProto) error
+type MigrationProcessor interface {
+	ProcessMigrations(migrations []api.MigrationProto) error
 }
 
 type MigrationFileProcessor interface {
@@ -25,27 +25,27 @@ type SignatureValidator interface {
 	ValidateSignature(r *http.Request, body []byte) bool
 }
 
-type HookManager struct {
+type HookHandler struct {
 	validator              SignatureValidator
-	migrationMgr           MigrationManager
+	migrationMgr           MigrationProcessor
 	migrationFileProcessor MigrationFileProcessor
 }
 
 var (
-	once sync.Once
-	mgr  *HookManager
+	hookOnce sync.Once
+	mgr      *HookHandler
 )
 
-func GetHookManager() *HookManager {
+func GetHookHandler() *HookHandler {
 	secret := os.Getenv("WEBHOOK_SECRET")
 	if secret == "" {
 		panic("WEBHOOK_SECRET environment variable is required")
 	}
 
-	once.Do(func() {
-		mgr = &HookManager{
+	hookOnce.Do(func() {
+		mgr = &HookHandler{
 			validator:              utils.NewSignatureValidator(secret),
-			migrationMgr:           migrations.GetMigrationsManager(),
+			migrationMgr:           managers.GetMigrationsManager(),
 			migrationFileProcessor: utils.GetMigrationFileProcessor(),
 		}
 	})
@@ -114,7 +114,7 @@ func (h *HookManager) HandlePush(w http.ResponseWriter, r *http.Request) *mjolni
 		migrationPrototypes = append(migrationPrototypes, proto...)
 	}
 
-	err = h.migrationMgr.ProcessMigrations(r.Context(), migrationPrototypes)
+	err = h.migrationMgr.ProcessMigrations(migrationPrototypes)
 	if err != nil {
 		return mjolnirUtils.InternalServerErr(fmt.Errorf("failed to process SQL changes: %w", err))
 	}
@@ -123,7 +123,7 @@ func (h *HookManager) HandlePush(w http.ResponseWriter, r *http.Request) *mjolni
 	return nil
 }
 
-func (h *HookManager) getSQLFiles(event *PushEvent) []string {
+func (h *HookHandler) getSQLFiles(event *PushEvent) []string {
 	sqlFiles := make([]string, 0)
 
 	// Collect all changed files

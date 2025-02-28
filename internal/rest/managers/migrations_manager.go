@@ -1,4 +1,4 @@
-package migrations
+package managers
 
 import (
 	"fmt"
@@ -14,12 +14,12 @@ type MigrationManager struct {
 }
 
 var (
-	manager *MigrationManager
-	once    sync.Once
+	manager        *MigrationManager
+	migrationsOnce sync.Once
 )
 
 func GetMigrationsManager() *MigrationManager {
-	once.Do(func() {
+	migrationsOnce.Do(func() {
 		manager = &MigrationManager{
 			databases:  postgres.GetDatabaseRepository(),
 			migrations: postgres.GetMigrationRepository(),
