@@ -6,6 +6,8 @@ import (
 
 type MigrationRepository interface {
 	GetFilteredBySignature(signatures []uint64) ([]*api.Migration, error)
+	GetAllForNamespace(namespace string) ([]*api.Migration, error)
+	GetById(id uint64) (*api.Migration, error)
 	BulkInsert(migrations []*api.MigrationProto) error
 	Close()
 }

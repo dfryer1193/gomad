@@ -37,14 +37,32 @@ func (mgr *MigrationManager) Close() {
 func (mgr *MigrationManager) ProcessMigrations(pending []api.MigrationProto) error {
 	incomplete, err := mgr.filterCompleted(pending)
 	if err != nil {
-		return fmt.Errorf("failed to fetch migrations while processing migrations: %w", err)
+		return fmt.Errorf("failed to fetch managers while processing managers: %w", err)
 	}
 
 	err = mgr.migrations.BulkInsert(incomplete)
 	if err != nil {
-		return fmt.Errorf("failed to bulk insert migrations: %w", err)
+		return fmt.Errorf("failed to bulk insert managers: %w", err)
 	}
 	return nil
+}
+
+func (mgr *MigrationManager) GetMigrationsForNamespace(namespace string) ([]*api.Migration, error) {
+	migrations, err := mgr.migrations.GetAllForNamespace(namespace)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch migrations for namespace %s : %w", namespace, err)
+	}
+
+	return migrations, nil
+}
+
+func (mgr *MigrationManager) GetMigrationById(id uint64) (*api.Migration, error) {
+	migration, err := mgr.migrations.GetById(id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch migration id %d: %w", id, err)
+	}
+
+	return migration, nil
 }
 
 func (mgr *MigrationManager) filterCompleted(pending []api.MigrationProto) ([]*api.MigrationProto, error) {

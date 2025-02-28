@@ -56,6 +56,41 @@ func (r *migrationRepository) GetFilteredBySignature(signatures []uint64) ([]*ap
 	return migrations, nil
 }
 
+func (r *migrationRepository) GetAllForNamespace(namespace string) ([]*api.Migration, error) {
+	query := `
+		SELECT id, namespace, "user", comment, ddl, completedAt
+		FROM managers
+		WHERE namespace = $1
+		ORDER BY Created ASC`
+	migrations, err := r.queryMigrations(query, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch migrations with query %s: %w", query, err)
+	}
+
+	return migrations, nil
+}
+
+func (r *migrationRepository) GetById(id uint64) (*api.Migration, error) {
+	query := `
+		SELECT id, namespace, "user", comment, ddl, completedAt
+		FROM managers
+		WHERE id = $1`
+	migrations, err := r.queryMigrations(query, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch migrations with query %s: %w", query, err)
+	}
+
+	if len(migrations) > 1 {
+		return nil, fmt.Errorf("found more than one manager with id %d", id)
+	}
+
+	if len(migrations) == 0 {
+		return nil, nil
+	}
+
+	return migrations[0], nil
+}
+
 func (r *migrationRepository) BulkInsert(migrations []*api.MigrationProto) error {
 	if len(migrations) == 0 {
 		return nil
