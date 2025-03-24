@@ -5,17 +5,33 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"os"
 	"strings"
+	"sync"
 )
 
 type SignatureValidator struct {
 	secret string
 }
 
-func NewSignatureValidator(secret string) *SignatureValidator {
-	return &SignatureValidator{
-		secret: secret,
-	}
+var (
+	signatureValidator *SignatureValidator
+	signatureOnce      sync.Once
+)
+
+func NewSignatureValidator() *SignatureValidator {
+	signatureOnce.Do(func() {
+		secret := os.Getenv("WEBHOOK_SECRET")
+		if secret == "" {
+			panic("WEBHOOK_SECRET environment variable not set")
+		}
+
+		signatureValidator = &SignatureValidator{
+			secret: secret,
+		}
+	})
+
+	return signatureValidator
 }
 
 func (sv *SignatureValidator) ValidateSignature(r *http.Request, body []byte) bool {

@@ -2,14 +2,14 @@ package handlers
 
 import (
 	"fmt"
+	"net/http"
+	"strings"
+	"sync"
+
 	"github.com/dfryer1193/gomad/api"
 	"github.com/dfryer1193/gomad/internal/rest/managers"
 	"github.com/dfryer1193/gomad/internal/utils"
 	mjolnirUtils "github.com/dfryer1193/mjolnir/utils"
-	"net/http"
-	"os"
-	"strings"
-	"sync"
 )
 
 type MigrationProcessor interface {
@@ -36,14 +36,9 @@ var (
 )
 
 func GetHookHandler() *HookHandler {
-	secret := os.Getenv("WEBHOOK_SECRET")
-	if secret == "" {
-		panic("WEBHOOK_SECRET environment variable is required")
-	}
-
 	hookOnce.Do(func() {
 		mgr = &HookHandler{
-			validator:              utils.NewSignatureValidator(secret),
+			validator:              utils.NewSignatureValidator(),
 			migrationMgr:           managers.GetMigrationsManager(),
 			migrationFileProcessor: utils.GetMigrationFileProcessor(),
 		}

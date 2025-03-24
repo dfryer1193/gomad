@@ -47,7 +47,9 @@ func TestValidateSignature(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			sv := NewSignatureValidator(tc.secret)
+			sv := &SignatureValidator{
+				secret: tc.secret,
+			}
 			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(tc.body))
 			req.Header.Set("X-Hub-Signature-256", tc.signature)
 
