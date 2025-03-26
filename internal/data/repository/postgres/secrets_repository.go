@@ -2,9 +2,6 @@ package postgres
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"fmt"
 	"sync"
 
 	"github.com/dfryer1193/gomad/internal/data/utils"
@@ -38,15 +35,10 @@ func GetSecretsRepository() *secretRepository {
 	return secretsRepo
 }
 
-func (r *secretRepository) CreateSecret(repoName string) (string, error) {
-	secret, err := generateRandomSecret()
-	if err != nil {
-		return "", fmt.Errorf("failed to generate secret: %w", err)
-	}
-
+func (r *secretRepository) InsertSecret(repoName string, secret string) (string, error) {
 	query := `INSERT INTO webhook_secrets (repo_name, secret) VALUES ($1, $2) RETURNING secret`
 	var savedSecret string
-	err = r.pool.QueryRow(context.Background(), query, repoName, secret).Scan(&savedSecret)
+	err := r.pool.QueryRow(context.Background(), query, repoName, secret).Scan(&savedSecret)
 	if err != nil {
 		return "", err
 	}
@@ -67,15 +59,4 @@ func (r *secretRepository) GetSecret(repoName string) (string, error) {
 
 func (r *secretRepository) Close() {
 	r.pool.Close()
-}
-
-func generateRandomSecret() (string, error) {
-	// Generate a random 32-byte secret
-	bytes := make([]byte, 32)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	secret := hex.EncodeToString(bytes)
-
-	return secret, nil
 }

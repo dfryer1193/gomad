@@ -5,7 +5,7 @@ import (
 )
 
 type SecretRepository interface {
-	SaveSecret(repoName string) (string, error)
+	InsertSecret(repoName string, secret string) (string, error)
 	GetSecret(repoName string) (string, error)
 	Close()
 }
