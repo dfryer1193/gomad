@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/dfryer1193/gomad/api"
+	"github.com/dfryer1193/gomad/internal/rest/managers"
 )
 
 const (
@@ -17,48 +18,80 @@ const (
 	TEST_NON_SQL_PATH = "test.txt"
 )
 
-type ValidSignatureValidator struct{}
+type validSignatureValidator struct{}
 
-func (v *ValidSignatureValidator) ValidateSignature(r *http.Request, body []byte) bool {
+func (v *validSignatureValidator) ValidateSignature(r *http.Request, repoName string, secret string, body []byte) bool {
 	return true
 }
 
-type InvalidSignatureValidator struct{}
+type invalidSignatureValidator struct{}
 
-func (v *InvalidSignatureValidator) ValidateSignature(r *http.Request, body []byte) bool {
+func (v *invalidSignatureValidator) ValidateSignature(r *http.Request, repoName string, secret string, body []byte) bool {
 	return false
 }
 
-type ErrorFileProcessor struct{}
+type errorFileProcessor struct{}
 
-func (f *ErrorFileProcessor) ProcessFile(_, path, _ string) ([]api.MigrationProto, error) {
+func (f *errorFileProcessor) ProcessFile(_, path, _ string) ([]api.MigrationProto, error) {
 	return nil, fmt.Errorf("error processing file %s", path)
 }
 
-type MockFileProcessor struct{}
+type mockFileProcessor struct{}
 
-func (f *MockFileProcessor) ProcessFile(_, _, _ string) ([]api.MigrationProto, error) {
+func (f *mockFileProcessor) ProcessFile(_, _, _ string) ([]api.MigrationProto, error) {
 	return []api.MigrationProto{}, nil
 }
 
-type ErrorMigrationProcessor struct{}
+type errorMigrationManager struct{}
 
-func (m *ErrorMigrationProcessor) ProcessMigrations(_ []api.MigrationProto) error {
+func (m *errorMigrationManager) ProcessMigrations(_ []api.MigrationProto) error {
 	return fmt.Errorf("error processing migrations")
 }
 
-type MockMigrationProcessor struct{}
+func (m *errorMigrationManager) GetMigrationsForNamespace(_ string) ([]*api.Migration, error) {
+	return nil, fmt.Errorf("error getting migrations")
+}
 
-func (m *MockMigrationProcessor) ProcessMigrations(_ []api.MigrationProto) error {
+func (m *errorMigrationManager) GetMigrationById(_ uint64) (*api.Migration, error) {
+	return nil, fmt.Errorf("error getting migration")
+}
+
+func (m *errorMigrationManager) Close() {}
+
+type mockMigrationManager struct{}
+
+func (m *mockMigrationManager) ProcessMigrations(_ []api.MigrationProto) error {
 	return nil
 }
+
+func (m *mockMigrationManager) GetMigrationsForNamespace(_ string) ([]*api.Migration, error) {
+	return nil, nil
+}
+
+func (m *mockMigrationManager) GetMigrationById(_ uint64) (*api.Migration, error) {
+	return nil, nil
+}
+
+func (m *mockMigrationManager) Close() {}
+
+type secretManagerMock struct{}
+
+func (s *secretManagerMock) SaveSecret(_ string) (string, error) {
+	return "test-secret", nil
+}
+
+func (s *secretManagerMock) GetSecret(_ string) (string, error) {
+	return "test-secret", nil
+}
+
+func (s *secretManagerMock) Close() {}
 
 func TestHandlePush(t *testing.T) {
 	testCases := []struct {
 		name               string
 		signatureValidator SignatureValidator
 		fileProcessor      MigrationFileProcessor
-		migrationManager   MigrationProcessor
+		migrationManager   managers.MigrationManager
 		event              *PushEvent
 		mangleBody         bool
 		secret             string
@@ -73,7 +106,7 @@ func TestHandlePush(t *testing.T) {
 		},
 		{
 			name:               "bad signature",
-			signatureValidator: &InvalidSignatureValidator{},
+			signatureValidator: &invalidSignatureValidator{},
 			event: &PushEvent{
 				Ref: "refs/heads/master",
 			},
@@ -82,7 +115,7 @@ func TestHandlePush(t *testing.T) {
 		},
 		{
 			name:               "non-master branch",
-			signatureValidator: &ValidSignatureValidator{},
+			signatureValidator: &validSignatureValidator{},
 			event: &PushEvent{
 				Ref: "refs/heads/develop",
 				Commits: []Commit{
@@ -95,7 +128,7 @@ func TestHandlePush(t *testing.T) {
 		},
 		{
 			name:               "no sql files",
-			signatureValidator: &ValidSignatureValidator{},
+			signatureValidator: &validSignatureValidator{},
 			event: &PushEvent{
 				Ref: "refs/heads/master",
 				Commits: []Commit{
@@ -108,8 +141,8 @@ func TestHandlePush(t *testing.T) {
 		},
 		{
 			name:               "error processing sql files",
-			signatureValidator: &ValidSignatureValidator{},
-			fileProcessor:      &ErrorFileProcessor{},
+			signatureValidator: &validSignatureValidator{},
+			fileProcessor:      &errorFileProcessor{},
 			event: &PushEvent{
 				Ref: "refs/heads/master",
 				Commits: []Commit{
@@ -122,8 +155,8 @@ func TestHandlePush(t *testing.T) {
 		},
 		{
 			name:               "error processing migrations files",
-			signatureValidator: &ValidSignatureValidator{},
-			fileProcessor:      &ErrorFileProcessor{},
+			signatureValidator: &validSignatureValidator{},
+			fileProcessor:      &errorFileProcessor{},
 			event: &PushEvent{
 				Ref: "refs/heads/master",
 				Commits: []Commit{
@@ -136,9 +169,9 @@ func TestHandlePush(t *testing.T) {
 		},
 		{
 			name:               "error processing migration prototypes",
-			signatureValidator: &ValidSignatureValidator{},
-			fileProcessor:      &MockFileProcessor{},
-			migrationManager:   &ErrorMigrationProcessor{},
+			signatureValidator: &validSignatureValidator{},
+			fileProcessor:      &mockFileProcessor{},
+			migrationManager:   &errorMigrationManager{},
 			event: &PushEvent{
 				Ref: "refs/heads/master",
 				Commits: []Commit{
@@ -151,9 +184,9 @@ func TestHandlePush(t *testing.T) {
 		},
 		{
 			name:               "successful processing",
-			signatureValidator: &ValidSignatureValidator{},
-			fileProcessor:      &MockFileProcessor{},
-			migrationManager:   &MockMigrationProcessor{},
+			signatureValidator: &validSignatureValidator{},
+			fileProcessor:      &mockFileProcessor{},
+			migrationManager:   &mockMigrationManager{},
 			event: &PushEvent{
 				Ref: "refs/heads/master",
 				Commits: []Commit{
@@ -172,6 +205,7 @@ func TestHandlePush(t *testing.T) {
 				validator:              tc.signatureValidator,
 				migrationFileProcessor: tc.fileProcessor,
 				migrationMgr:           tc.migrationManager,
+				secretMgr:              &secretManagerMock{},
 			}
 			w := httptest.NewRecorder()
 			bodyBytes := []byte("invalid json")
