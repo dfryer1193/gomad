@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/dfryer1193/gomad/api"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/dfryer1193/gomad/api"
 )
 
 const (
@@ -167,7 +168,7 @@ func TestHandlePush(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := &HookHandler{
+			h := &hookHandler{
 				validator:              tc.signatureValidator,
 				migrationFileProcessor: tc.fileProcessor,
 				migrationMgr:           tc.migrationManager,
