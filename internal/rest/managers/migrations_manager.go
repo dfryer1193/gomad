@@ -2,25 +2,33 @@ package managers
 
 import (
 	"fmt"
+	"sync"
+
 	"github.com/dfryer1193/gomad/api"
 	"github.com/dfryer1193/gomad/internal/data/repository"
 	"github.com/dfryer1193/gomad/internal/data/repository/postgres"
-	"sync"
 )
 
-type MigrationManager struct {
+type MigrationManager interface {
+	ProcessMigrations(pending []api.MigrationProto) error
+	GetMigrationsForNamespace(namespace string) ([]*api.Migration, error)
+	GetMigrationById(id uint64) (*api.Migration, error)
+	Close()
+}
+
+type migrationManager struct {
 	databases  repository.DatabaseRepository
 	migrations repository.MigrationRepository
 }
 
 var (
-	manager        *MigrationManager
+	manager        *migrationManager
 	migrationsOnce sync.Once
 )
 
-func GetMigrationsManager() *MigrationManager {
+func GetMigrationsManager() *migrationManager {
 	migrationsOnce.Do(func() {
-		manager = &MigrationManager{
+		manager = &migrationManager{
 			databases:  postgres.GetDatabaseRepository(),
 			migrations: postgres.GetMigrationRepository(),
 		}
@@ -29,12 +37,12 @@ func GetMigrationsManager() *MigrationManager {
 	return manager
 }
 
-func (mgr *MigrationManager) Close() {
+func (mgr *migrationManager) Close() {
 	mgr.databases.Close()
 	mgr.migrations.Close()
 }
 
-func (mgr *MigrationManager) ProcessMigrations(pending []api.MigrationProto) error {
+func (mgr *migrationManager) ProcessMigrations(pending []api.MigrationProto) error {
 	incomplete, err := mgr.filterCompleted(pending)
 	if err != nil {
 		return fmt.Errorf("failed to fetch managers while processing managers: %w", err)
@@ -47,7 +55,7 @@ func (mgr *MigrationManager) ProcessMigrations(pending []api.MigrationProto) err
 	return nil
 }
 
-func (mgr *MigrationManager) GetMigrationsForNamespace(namespace string) ([]*api.Migration, error) {
+func (mgr *migrationManager) GetMigrationsForNamespace(namespace string) ([]*api.Migration, error) {
 	migrations, err := mgr.migrations.GetAllForNamespace(namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch migrations for namespace %s : %w", namespace, err)
@@ -56,7 +64,7 @@ func (mgr *MigrationManager) GetMigrationsForNamespace(namespace string) ([]*api
 	return migrations, nil
 }
 
-func (mgr *MigrationManager) GetMigrationById(id uint64) (*api.Migration, error) {
+func (mgr *migrationManager) GetMigrationById(id uint64) (*api.Migration, error) {
 	migration, err := mgr.migrations.GetById(id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch migration id %d: %w", id, err)
@@ -65,7 +73,7 @@ func (mgr *MigrationManager) GetMigrationById(id uint64) (*api.Migration, error)
 	return migration, nil
 }
 
-func (mgr *MigrationManager) filterCompleted(pending []api.MigrationProto) ([]*api.MigrationProto, error) {
+func (mgr *migrationManager) filterCompleted(pending []api.MigrationProto) ([]*api.MigrationProto, error) {
 	sigMap := make(map[uint64]*api.MigrationProto)
 	signatures := make([]uint64, 0, len(pending))
 	for idx := range pending {
