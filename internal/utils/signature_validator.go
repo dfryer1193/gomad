@@ -5,36 +5,37 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
+
+	"github.com/dfryer1193/gomad/internal/data/repository"
+	"github.com/dfryer1193/gomad/internal/data/repository/postgres"
 )
 
-type SignatureValidator struct {
-	secret string
+type SignatureValidator interface {
+	ValidateSignature(r *http.Request, repoName string, secret string, body []byte) bool
+}
+
+type signatureValidator struct {
+	secretsRepo repository.SecretRepository
 }
 
 var (
-	signatureValidator *SignatureValidator
-	signatureOnce      sync.Once
+	validator     *signatureValidator
+	signatureOnce sync.Once
 )
 
-func NewSignatureValidator() *SignatureValidator {
+func NewSignatureValidator() *signatureValidator {
 	signatureOnce.Do(func() {
-		secret := os.Getenv("WEBHOOK_SECRET")
-		if secret == "" {
-			panic("WEBHOOK_SECRET environment variable not set")
-		}
-
-		signatureValidator = &SignatureValidator{
-			secret: secret,
+		validator = &signatureValidator{
+			secretsRepo: postgres.GetSecretsRepository(),
 		}
 	})
 
-	return signatureValidator
+	return validator
 }
 
-func (sv *SignatureValidator) ValidateSignature(r *http.Request, body []byte) bool {
+func (sv *signatureValidator) ValidateSignature(r *http.Request, repoName string, secret string, body []byte) bool {
 	signature := r.Header.Get("X-Hub-Signature-256")
 	if signature == "" {
 		return false
@@ -42,7 +43,7 @@ func (sv *SignatureValidator) ValidateSignature(r *http.Request, body []byte) bo
 
 	signature = strings.TrimPrefix(signature, "sha256=")
 
-	mac := hmac.New(sha256.New, []byte(sv.secret))
+	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(body)
 	expectedSignature := hex.EncodeToString(mac.Sum(nil))
 

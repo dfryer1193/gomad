@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -12,39 +13,75 @@ import (
 	mjolnirUtils "github.com/dfryer1193/mjolnir/utils"
 )
 
-type MigrationProcessor interface {
-	ProcessMigrations(migrations []api.MigrationProto) error
-}
-
 type MigrationFileProcessor interface {
 	ProcessFile(repoName string, path string, commit string) ([]api.MigrationProto, error)
 }
 
 type SignatureValidator interface {
-	ValidateSignature(r *http.Request, body []byte) bool
+	ValidateSignature(r *http.Request, repoName string, secret string, body []byte) bool
 }
 
-type HookHandler struct {
+type HookHandler interface {
+	HandlePush(w http.ResponseWriter, r *http.Request) *mjolnirUtils.ApiError
+	HandleCreateSecret(w http.ResponseWriter, r *http.Request) *mjolnirUtils.ApiError
+	Close()
+}
+
+type hookHandler struct {
 	validator              SignatureValidator
-	migrationMgr           MigrationProcessor
+	migrationMgr           managers.MigrationManager
 	migrationFileProcessor MigrationFileProcessor
+	secretMgr              managers.SecretManager
 }
 
 var (
 	hookOnce sync.Once
-	mgr      *HookHandler
+	mgr      *hookHandler
 )
 
-func GetHookHandler() *HookHandler {
+func GetHookHandler() *hookHandler {
 	hookOnce.Do(func() {
-		mgr = &HookHandler{
+		mgr = &hookHandler{
 			validator:              utils.NewSignatureValidator(),
 			migrationMgr:           managers.GetMigrationsManager(),
 			migrationFileProcessor: utils.GetMigrationFileProcessor(),
+			secretMgr:              managers.GetSecretManager(),
 		}
 	})
 
 	return mgr
+}
+
+func (h *hookHandler) HandleCreateSecret(w http.ResponseWriter, r *http.Request) *mjolnirUtils.ApiError {
+	ip := r.Header.Get("X-Real-IP")
+	if ip == "" {
+		ip = r.Header.Get("X-Forwarded-For")
+	}
+	if ip == "" {
+		ip = r.RemoteAddr
+	}
+
+	// Check if IP is from my local network)
+	// TODO: Create a way to specify this from a config
+	if !isIPInRange(ip, "192.168.0.0/16") || !isIPInRange(ip, "10.110.173.0/24") {
+		return mjolnirUtils.UnauthorizedErr(fmt.Errorf("unauthorized IP address: %s", ip))
+	}
+
+	var repoName struct {
+		Name string `json:"repoName"`
+	}
+	_, err := mjolnirUtils.DecodeJSON(r, repoName)
+	if err != nil {
+		return mjolnirUtils.BadRequestErr(fmt.Errorf("failed to decode JSON: %w", err))
+	}
+
+	secret, err := h.secretMgr.SaveSecret(repoName.Name)
+	if err != nil {
+		return mjolnirUtils.InternalServerErr(fmt.Errorf("failed to save secret: %w", err))
+	}
+
+	mjolnirUtils.RespondJSON(w, r, http.StatusOK, map[string]string{"secret": secret})
+	return nil
 }
 
 type Repository struct {
@@ -74,7 +111,7 @@ type PushEvent struct {
 }
 
 // HandlePush handles Git push webhooks by looking for added or modified sql files and treating them as migrations files
-func (h *HookHandler) HandlePush(w http.ResponseWriter, r *http.Request) *mjolnirUtils.ApiError {
+func (h *hookHandler) HandlePush(w http.ResponseWriter, r *http.Request) *mjolnirUtils.ApiError {
 	// Read the raw body
 	event := &PushEvent{}
 	bodyBytes, err := mjolnirUtils.DecodeJSON(r, event)
@@ -82,8 +119,13 @@ func (h *HookHandler) HandlePush(w http.ResponseWriter, r *http.Request) *mjolni
 		return mjolnirUtils.BadRequestErr(fmt.Errorf("failed to decode JSON: %w", err))
 	}
 
+	secret, err := h.secretMgr.GetSecret(event.Repository.FullName)
+	if err != nil {
+		return mjolnirUtils.InternalServerErr(fmt.Errorf("failed to get secret for repo %s: %w", event.Repository.FullName, err))
+	}
+
 	// Validate webhook signature
-	if !h.validator.ValidateSignature(r, bodyBytes) {
+	if !h.validator.ValidateSignature(r, event.Repository.FullName, secret, bodyBytes) {
 		return mjolnirUtils.UnauthorizedErr(fmt.Errorf("Invalid webhook signature"))
 	}
 
@@ -117,7 +159,12 @@ func (h *HookHandler) HandlePush(w http.ResponseWriter, r *http.Request) *mjolni
 	return nil
 }
 
-func (h *HookHandler) getSQLFiles(event *PushEvent) []string {
+func (h *hookHandler) Close() {
+	h.migrationMgr.Close()
+	h.secretMgr.Close()
+}
+
+func (h *hookHandler) getSQLFiles(event *PushEvent) []string {
 	sqlFiles := make([]string, 0)
 
 	// Collect all changed files
@@ -135,4 +182,18 @@ func (h *HookHandler) getSQLFiles(event *PushEvent) []string {
 	}
 
 	return sqlFiles
+}
+
+func isIPInRange(ipStr, cidrStr string) bool {
+	ip := net.ParseIP(strings.Split(ipStr, ":")[0]) // Remove port if present
+	if ip == nil {
+		return false
+	}
+
+	_, ipNet, err := net.ParseCIDR(cidrStr)
+	if err != nil {
+		return false
+	}
+
+	return ipNet.Contains(ip)
 }
