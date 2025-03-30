@@ -2,24 +2,21 @@ package handlers
 
 import (
 	"fmt"
-	"github.com/dfryer1193/gomad/api"
-	"github.com/dfryer1193/gomad/internal/rest/managers"
-	mjolnirUtils "github.com/dfryer1193/mjolnir/utils"
 	"net/http"
 	"strconv"
 	"sync"
-)
 
-type MigrationManager interface {
-	GetMigrationsForNamespace(namespace string) ([]*api.Migration, error)
-	GetMigrationById(id uint64) (*api.Migration, error)
-}
+	"github.com/dfryer1193/gomad/api"
+	"github.com/dfryer1193/gomad/internal/rest/managers"
+	mjolnirUtils "github.com/dfryer1193/mjolnir/utils"
+)
 
 type NamespaceManager interface {
 	GetNamespaces() ([]string, error)
 }
+
 type MigrationHandler struct {
-	migrationsMgr MigrationManager
+	migrationsMgr managers.MigrationManager
 	namespacesMgr NamespaceManager
 }
 

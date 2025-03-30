@@ -4,6 +4,12 @@ import (
 	"github.com/dfryer1193/gomad/api"
 )
 
+type SecretRepository interface {
+	InsertSecret(repoName string, secret string) (string, error)
+	GetSecret(repoName string) (string, error)
+	Close()
+}
+
 type MigrationRepository interface {
 	GetFilteredBySignature(signatures []uint64) ([]*api.Migration, error)
 	GetAllForNamespace(namespace string) ([]*api.Migration, error)

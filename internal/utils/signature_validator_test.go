@@ -10,6 +10,20 @@ import (
 	"testing"
 )
 
+type mockSecretRepository struct {
+}
+
+func (m *mockSecretRepository) GetSecret(repoName string) (string, error) {
+	return "test-secret", nil
+}
+
+func (m *mockSecretRepository) InsertSecret(repoName string, secret string) (string, error) {
+	return "", nil
+}
+
+func (m *mockSecretRepository) Close() {
+}
+
 func TestValidateSignature(t *testing.T) {
 	testCases := []struct {
 		name      string
@@ -47,13 +61,13 @@ func TestValidateSignature(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			sv := &SignatureValidator{
-				secret: tc.secret,
+			sv := &signatureValidator{
+				secretsRepo: &mockSecretRepository{},
 			}
 			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(tc.body))
 			req.Header.Set("X-Hub-Signature-256", tc.signature)
 
-			got := sv.ValidateSignature(req, tc.body)
+			got := sv.ValidateSignature(req, "test-repo", tc.secret, tc.body)
 			if got != tc.want {
 				t.Errorf("validateSignature() = %v, want %v", got, tc.want)
 			}
