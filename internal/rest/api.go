@@ -10,6 +10,10 @@ func SetupRoutes(router *chi.Mux) {
 	hookHandler := handlers.GetHookHandler()
 	migrationsHandler := handlers.GetMigrationHandler()
 
+	router.Route("/login/v1", func(r chi.Router) {
+		r.Post("/", mjolnirUtils.ErrorHandler(handlers.GetAdminHandler().Login))
+	})
+
 	router.Route("/handlers/v1", func(r chi.Router) {
 		r.Post("/push", mjolnirUtils.ErrorHandler(hookHandler.HandlePush))
 	})

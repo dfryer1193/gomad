@@ -32,6 +32,7 @@ type hookHandler struct {
 	migrationMgr           managers.MigrationManager
 	migrationFileProcessor MigrationFileProcessor
 	secretMgr              managers.SecretManager
+	adminHandler           AdminHandler
 }
 
 var (
@@ -53,24 +54,25 @@ func GetHookHandler() *hookHandler {
 }
 
 func (h *hookHandler) HandleCreateSecret(w http.ResponseWriter, r *http.Request) *mjolnirUtils.ApiError {
-	ip := r.Header.Get("X-Real-IP")
-	if ip == "" {
-		ip = r.Header.Get("X-Forwarded-For")
+	// Check for bearer token
+	bearerToken := r.Header.Get("Authorization")
+	if !strings.HasPrefix(bearerToken, "Bearer ") {
+		return mjolnirUtils.UnauthorizedErr(fmt.Errorf("missing or invalid authorization header"))
 	}
-	if ip == "" {
-		ip = r.RemoteAddr
-	}
+	token := strings.TrimPrefix(bearerToken, "Bearer ")
 
-	// Check if IP is from my local network)
-	// TODO: Create a way to specify this from a config
-	if !isIPInRange(ip, "192.168.0.0/16") || !isIPInRange(ip, "10.110.173.0/24") {
-		return mjolnirUtils.UnauthorizedErr(fmt.Errorf("unauthorized IP address: %s", ip))
+	authed, err := h.adminHandler.ValidateToken(token)
+	if err != nil {
+		return mjolnirUtils.UnauthorizedErr(fmt.Errorf("failed to validate token: %w", err))
+	}
+	if !authed {
+		return mjolnirUtils.UnauthorizedErr(fmt.Errorf("invalid token"))
 	}
 
 	var repoName struct {
 		Name string `json:"repoName"`
 	}
-	_, err := mjolnirUtils.DecodeJSON(r, repoName)
+	_, err = mjolnirUtils.DecodeJSON(r, repoName)
 	if err != nil {
 		return mjolnirUtils.BadRequestErr(fmt.Errorf("failed to decode JSON: %w", err))
 	}
